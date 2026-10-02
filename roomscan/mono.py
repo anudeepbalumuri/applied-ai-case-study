@@ -97,6 +97,11 @@ def select_video_frames(video_path, target_fps=2.5, max_frames=320, long_side=96
 
 
 # ----------------------------------------------------------------------------- SfM
+LOCAL_WINDOW = 12          # selected frames (~2 s of video): always matched
+LOOP_MIN_MATCHES = 150     # long-range pairs must be this strong (repetitive tiles/white walls
+                           # otherwise glue rigid segments together at wrong angles)
+
+
 def _learned_matches(images, db_path, work, exhaustive, log):
     """Replace SIFT keypoints/matches in the COLMAP database with DISK + LightGlue, then verify."""
     import pycolmap
@@ -117,7 +122,8 @@ def _learned_matches(images, db_path, work, exhaustive, log):
     tot = 0
     for i, j in pairs:
         m = lm.match(feats[i], feats[j])
-        if len(m) >= 15:
+        need = 15 if (exhaustive or j - i <= LOCAL_WINDOW) else LOOP_MIN_MATCHES
+        if len(m) >= need:
             db.write_matches(ids[f"{i:05d}.jpg"], ids[f"{j:05d}.jpg"], m)
             lines.append(f"{i:05d}.jpg {j:05d}.jpg")
             tot += len(m)
@@ -181,7 +187,7 @@ class LearnedMatcher:
         return m.astype(np.uint32)
 
 
-def _pairs(n, window=10, quad=(16, 24, 32, 48, 64, 96, 128)):
+def _pairs(n, window=LOCAL_WINDOW, quad=(16, 24, 32, 48, 64, 96, 128)):
     P = set()
     for i in range(n):
         for d in list(range(1, window + 1)) + list(quad):
@@ -291,38 +297,36 @@ def manhattan_axes(normals, iters=3):
                 M[:, k] = R[:, k]
         U, _, Vt = np.linalg.svd(M)
         R = U @ Vt
+    if np.linalg.det(R) < 0:
+        R[:, 2] *= -1                      # proper rotation (right-handed axes)
     return R
 
 
-def estimate_gravity(pts, normals, cam_centres):
-    """World 'down' vector.
+def estimate_gravity(pts, normals, cam_centres, cam_forward=None):
+    """World 'down' vector, independent of how the phone was held.
 
-    Gravity is the Manhattan axis best aligned with the camera trajectory's smallest-variance
-    direction (handheld walkthroughs move at near-constant height). The sign is chosen so that
-    up-facing surfaces (floor, tables) lie below the cameras. Independent of how the phone was
-    held (portrait video stored landscape breaks the 'camera y is down' heuristic: 93 deg error).
+    Axis: the Manhattan axis that (a) the camera trajectory varies least along (handheld walkthroughs
+    stay at near-constant height) and (b) the optical axes are most perpendicular to (people film
+    walls, not the floor). Sign: up-facing surfaces (floor, table/bed/sofa tops) outnumber
+    down-facing ones (ceiling). A geometric below/above test cannot decide the sign: flipping the
+    world swaps floor and ceiling and stays consistent.
     """
     axes = manhattan_axes(normals)
+    score = np.zeros(3)
     if len(cam_centres) >= 5:
         c = cam_centres - cam_centres.mean(0)
         w, V = np.linalg.eigh(c.T @ c)
-        thin = V[:, 0]
-        k = int(np.argmax(np.abs(axes.T @ thin)))
-    else:
-        # few views (photo tier): the axis with the most normal support is usually the floor/ceiling
-        k = int(np.argmax([np.sum(np.abs(normals @ axes[:, i]) > 0.95) for i in range(3)]))
-    a = axes[:, k]
-    ref = cam_centres.mean(0)
-    best = None
-    for sgn in (1.0, -1.0):
-        up = sgn * a
-        facing = normals @ up > 0.9
-        if facing.sum() < 50:
-            continue
-        below = np.mean((pts[facing] - ref) @ up < 0)
-        if best is None or below > best[0]:
-            best = (below, up)
-    up = best[1] if best else a
+        flat = 1.0 - np.sqrt(max(w[0], 0) / max(w[1], 1e-12))          # 1 = trajectory is planar
+        score += flat * np.abs(axes.T @ V[:, 0])
+    if cam_forward is not None and len(cam_forward):
+        score += 1.0 - np.mean(np.abs(cam_forward @ axes), 0)
+    if not score.any():
+        # no trajectory / orientation cue: the axis with the most normal support (floor + ceiling)
+        score = np.array([np.sum(np.abs(normals @ axes[:, i]) > 0.95) for i in range(3)], float)
+    a = axes[:, int(np.argmax(score))]
+    n_pos = np.sum(normals @ a > 0.9)
+    n_neg = np.sum(normals @ a < -0.9)
+    up = a if n_pos >= n_neg else -a
     return -up
 
 
@@ -426,51 +430,171 @@ def _to_cloud(pts, nrm, cams, voxel=0.03):
 
 
 # ----------------------------------------------------------------------------- video tier
-def reconstruct_video(cap, log=print, timer=None, target_fps=6.0, max_frames=360, keep_work=False):
+VIDEO_FPS = 6.0
+MAX_FRAMES = 360
+SEQ_WINDOW = 3                 # odometry edges to the next 1..3 frames (bridges blurred frames)
+LOOP_OFFSETS = (12, 18, 24, 36, 48, 72, 96, 144)
+LOOP_MIN_INLIERS = 150
+
+
+def _frame_normals_cam(depth, K, stride=8):
+    ds = depth[::stride, ::stride]
+    fx, fy, cx, cy = K[0, 0] / stride, K[1, 1] / stride, K[0, 2] / stride, K[1, 2] / stride
+    vv, uu = np.mgrid[0:ds.shape[0], 0:ds.shape[1]].astype(np.float32)
+    pm = np.stack([(uu + 0.5 - cx) / fx * ds, (vv + 0.5 - cy) / fy * ds, ds], -1)
+    n, ok = normals_from_pointmap(pm, (ds > 0.2) & (ds < 6))
+    return n[ok]
+
+
+def _odometry_edges(frames, D, F, K, lm, pair_pose):
+    n = len(frames)
+    raw = {}
+    for i in range(n):
+        for d in range(1, SEQ_WINDOW + 1):
+            if i + d < n:
+                e = pair_pose(F[i], F[i + d], D[i], D[i + d], K, K, lm)
+                if e is not None:
+                    raw[(i, i + d)] = dict(e, loop=False)
+    return raw
+
+
+def _breaks(n, raw):
+    """Consecutive frame pairs (i, i+1) not joined by any path through odometry edges."""
+    import networkx as nx
+    G = nx.Graph(); G.add_nodes_from(range(n)); G.add_edges_from(raw)
+    comp = {}
+    for ci, c in enumerate(nx.connected_components(G)):
+        for k in c:
+            comp[k] = ci
+    return [i for i in range(n - 1) if comp[i] != comp[i + 1]]
+
+
+def _densify(video_path, frames, D, F, K, gaps, net, lm, pair_pose, log, long_side=960):
+    from .capture import iter_video_frames
+    want = set()
+    for i in gaps:
+        a, b = frames[max(i - 1, 0)]["index"], frames[min(i + 2, len(frames) - 1)]["index"]
+        want.update(range(a + 1, b))
+    want -= {f["index"] for f in frames}
+    extra = []
+    for idx, img in iter_video_frames(video_path, indices=sorted(want)):
+        s = long_side / max(img.shape[:2])
+        small = cv2.resize(img, None, fx=s, fy=s, interpolation=cv2.INTER_AREA)
+        g = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+        extra.append({"index": idx, "img": small, "sharpness": float(cv2.Laplacian(g, cv2.CV_32F).var()),
+                      "brightness": float(g.mean()), "bridge": True})
+    pos = {f["index"]: k for k, f in enumerate(frames)}
+    allf = sorted(frames + extra, key=lambda f: f["index"])
+    D2, F2 = [], []
+    for f in allf:
+        if not f.get("bridge"):
+            D2.append(D[pos[f["index"]]]); F2.append(F[pos[f["index"]]])
+        else:
+            D2.append(net(f["img"]) / MONO_SCALE_BIAS); F2.append(lm.features(f["img"]))
+    raw = _odometry_edges(allf, D2, F2, K, lm, pair_pose)
+    left = _breaks(len(allf), raw)
+    log(f"video: densified {len(gaps)} breaks with {len(extra)} raw frames; {len(left)} breaks remain")
+    return allf, D2, F2, raw
+
+
+def reconstruct_video(cap, log=print, timer=None, target_fps=VIDEO_FPS, max_frames=MAX_FRAMES):
+    """Video tier: PnP-on-metric-depth pose graph with Manhattan rotation anchors (see posegraph.py)."""
+    from .photo import pair_pose
+    from .posegraph import chain_init, frame_axis_obs, optimise
     frames, fps = select_video_frames(cap.video_path, target_fps, max_frames)
     dark = sum(f["brightness"] < 45 for f in frames)
     log(f"video: {len(frames)} frames selected ({dark} low-light)")
     if timer:
         timer.lap("frame_selection")
-    work = tempfile.mkdtemp(prefix="roomscan_sfm_")
-    try:
-        poses, K, sparse, sfm = run_sfm([f["img"] for f in frames], work, log=log)
-    finally:
-        if not keep_work:
-            shutil.rmtree(work, ignore_errors=True)
+    net, lm = DepthNet.get(), LearnedMatcher.get()
+    h, w = frames[0]["img"].shape[:2]
+    K = np.array([[IPHONE_FOCAL_FACTOR * max(w, h), 0, w / 2], [0, IPHONE_FOCAL_FACTOR * max(w, h), h / 2], [0, 0, 1.0]])
+    D = [net(f["img"]) / MONO_SCALE_BIAS for f in frames]
+    F = [lm.features(f["img"]) for f in frames]
     if timer:
-        timer.lap("sfm")
-    net = DepthNet.get()
-    pts, nrm, ratios, per_frame = fuse_mono(frames, poses, K, sparse, net, log=log)
+        timer.lap("depth_and_features")
+    raw = _odometry_edges(frames, D, F, K, lm, pair_pose)
+    # densify across breaks: fast pans blur every frame of a selection window; consecutive *raw* frames
+    # (1/46 s apart) still overlap, so decode them and chain through as bridge nodes
+    gaps = _breaks(len(frames), raw)
+    if gaps:
+        frames, D, F, raw = _densify(cap.video_path, frames, D, F, K, gaps, net, lm, pair_pose, log)
+    n = len(frames)
+    for i in range(0, n, 2):
+        if frames[i].get("bridge"):
+            continue
+        for d in LOOP_OFFSETS:
+            if i + d < n and (i, i + d) not in raw and not frames[i + d].get("bridge"):
+                e = pair_pose(F[i], F[i + d], D[i], D[i + d], K, K, lm, min_inliers=LOOP_MIN_INLIERS)
+                if e is not None:
+                    raw[(i, i + d)] = dict(e, loop=True)
+    log(f"video: {sum(not e['loop'] for e in raw.values())} odometry edges, {sum(e['loop'] for e in raw.values())} loop edges")
+    # consistent per-frame depth scales (log-ratio least squares), then metric edge transforms
+    from .photo import solve_graph
+    _, scales, comps = solve_graph(n, {k: {"inliers": e["inliers"], "ratio": e["ratio"], "T_i_j": e["T_i_j"]} for k, e in raw.items()})
+    main = set(comps[0])
+    edges = {}
+    for (i, j), e in raw.items():
+        if i in main and j in main:
+            T = e["T_i_j"].copy()
+            T[:3, 3] *= scales[i]
+            edges[(i, j)] = {"T": T, "w": e["inliers"], "loop": e["loop"]}
+    init, _ = chain_init(n, edges)
+    init = {k: v for k, v in init.items() if k in main}
     if timer:
-        timer.lap("mono_depth")
-    # gravity (see estimate_gravity: robust to portrait/landscape handling)
-    cam_c = np.array([poses[k][:3, 3] for k in sorted(poses)])
-    R = align_gravity(estimate_gravity(pts, nrm, cam_c))
+        timer.lap("pairwise_poses")
+    # Manhattan anchors
+    ncam = {k: _frame_normals_cam(D[k] * scales[k], K) for k in init}
+    poses = init
+    W = None
+    for it in range(2):
+        allw = np.concatenate([ncam[k] @ poses[k][:3, :3].T for k in poses])
+        W = manhattan_axes(allw)
+        anchors = {}
+        for k in poses:
+            ob = frame_axis_obs(ncam[k], poses[k][:3, :3].T @ W)
+            if ob:
+                anchors[k] = ob
+        poses, info = optimise(n, edges, poses, anchors, W)
+        log(f"video: pose graph pass {it + 1}: {info}")
+    if timer:
+        timer.lap("pose_graph")
+    keys = [k for k in sorted(poses) if not frames[k].get("bridge")]
+    pts, nrm = [], []
+    for k in keys:
+        d = D[k] * scales[k]
+        st = 4
+        ds = d[::st, ::st]
+        vv, uu = np.mgrid[0:ds.shape[0], 0:ds.shape[1]].astype(np.float32)
+        pm = np.stack([(uu * st + st / 2 - K[0, 2]) / K[0, 0] * ds, (vv * st + st / 2 - K[1, 2]) / K[1, 1] * ds, ds], -1)
+        nn, ok = normals_from_pointmap(pm, (ds > 0.2) & (ds < 5.0))
+        T = poses[k]
+        pts.append(pm[ok] @ T[:3, :3].T + T[:3, 3])
+        nrm.append(nn[ok] @ T[:3, :3].T)
+    pts, nrm = np.concatenate(pts), np.concatenate(nrm)
+    cams = np.array([poses[k][:3, 3] for k in keys])
+    fwd = np.array([poses[k][:3, 2] for k in keys])
+    R = align_gravity(estimate_gravity(pts, nrm, cams, fwd))
     R = refine_gravity(pts, nrm, R)
-    pts_g, nrm_g = pts @ R.T, nrm @ R.T
-    cams = np.array([poses[k][:3, 3] for k in sorted(poses)]) @ R.T
-    # camera height (sfm units): camera y minus floor y (lowest dense up-facing layer)
-    up = nrm_g[:, 1] > 0.9
-    if up.sum() > 500:
-        yf = pts_g[up, 1]
-        h, e = np.histogram(yf, bins=200)
-        cand = np.where(h >= 0.3 * h.max())[0]
-        floor_y = e[cand[0]]
-        cam_h = float(np.median(cams[:, 1]) - floor_y)
-    else:
-        cam_h = None
-    s, sig, det = metric_scale(ratios, cam_h, log=log)
-    cloud = _to_cloud(pts_g * s, nrm_g, cams * s)
+    pts, nrm, cams = pts @ R.T, nrm @ R.T, cams @ R.T
+    # metric scale: depth network (already bias-corrected => factor 1) fused with camera height
+    from .photo import pick_floor
+    fy = pick_floor(pts, nrm, cams)
+    cam_h = float(np.median(cams[:, 1]) - fy) if fy is not None else None
+    s, sig, det = metric_scale(np.full(200, MONO_SCALE_BIAS), cam_h, log=log)
+    cloud = _to_cloud(pts * s, nrm, cams * s)
     if timer:
         timer.lap("scale_and_fusion")
-    info = {"sfm": sfm, "frames_selected": len(frames), "low_light_frames": int(dark),
-            "scale": {"metres_per_sfm_unit": s, "cues": det}, "scale_rel_sigma": sig,
+    info = {"method": "PnP pose graph on metric mono depth + Manhattan rotation anchors",
+            "frames_selected": n, "frames_posed": len(keys), "low_light_frames": int(dark),
+            "odometry_edges": sum(not e["loop"] for e in edges.values()), "loop_edges": sum(e["loop"] for e in edges.values()),
+            "anchors": len(anchors), "scale": {"factor": s, "cues": det}, "scale_rel_sigma": sig,
             "depth_model": DEPTH_MODEL, "frame_rate": fps}
-    views = {"images": {k: frames[k]["img"] for k in poses}, "views": [
-        {"frame_index": frames[k]["index"], "key": k,
-         "T_wc": _scaled_pose(poses[k], R, s), "K": K, "rgb_size": frames[k]["img"].shape[1::-1]}
-        for k in sorted(poses)]}
+    views = {"images": {k: frames[k]["img"] for k in keys}, "views": [
+        {"frame_index": frames[k]["index"], "key": k, "T_wc": _scaled_pose(poses[k], R, s), "K": K,
+         "rgb_size": frames[k]["img"].shape[1::-1]} for k in keys]}
+    info["_frame_map"] = {k: frames[k]["index"] for k in keys}
+    info["_poses"] = {k: _scaled_pose(poses[k], R, s) for k in keys}
     return cloud, info, views
 
 

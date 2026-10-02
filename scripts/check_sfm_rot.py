@@ -23,3 +23,7 @@ for a, b in zip(keys[:-5], keys[5:]):
 errs = np.array(errs)
 print("relative rotation: sfm median %.1f deg, arkit median %.1f deg, disagreement median %.2f p90 %.2f" %
       (np.median(errs[:, 0]), np.median(errs[:, 1]), np.median(errs[:, 2]), np.percentile(errs[:, 2], 90)))
+Rs=[poses[k][:3,:3] for k in keys]; Rt=[cap.frames[frames[k]["index"]].T_wc[:3,:3] for k in keys]
+Mm=sum(t@s.T for s,t in zip(Rs,Rt)); U,_,Vt=np.linalg.svd(Mm); R0=U@Vt
+e=np.array([np.degrees(np.arccos(np.clip((np.trace((R0@s).T@t)-1)/2,-1,1))) for s,t in zip(Rs,Rt)])
+print("absolute rotation error: median %.1f p90 %.1f max %.1f deg; registered %d/%d" % (np.median(e), np.percentile(e,90), e.max(), len(keys), len(frames)))

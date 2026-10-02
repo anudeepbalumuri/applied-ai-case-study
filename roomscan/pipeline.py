@@ -75,19 +75,26 @@ def run(path, out_dir, tier=None, capture_id=None, opts=None, log=print, damage=
     log(f"[{capture_id}] tier={tier}")
     timer.lap("load")
     if tier == "photo":
-        from .mono import reconstruct_photos
+        from .photo import reconstruct_photos
         result = reconstruct_photos(cap, capture_id=capture_id, log=log, timer=timer, **opts.get("photo", {}))
-        views = result.pop("_views", None)
+        views = result.pop("_per_room", None)
+        result.pop("_frame", None)
     else:
         cloud, info, views, scale_rel = reconstruct(cap, tier, opts, log, timer)
         plan = extract_plan(cloud, cloud.cam_positions, log=log)
         timer.lap("layout")
         err = ErrorModel(tier, scale_rel=scale_rel)
-        result = plan_to_json(plan, tier, capture_id, err, extra={"reconstruction": info})
+        result = plan_to_json(plan, tier, capture_id, err, extra={
+            "reconstruction": info,
+            "plan_frame": {"yaw_rad": float(plan["frame"].yaw), "floor_y_world": float(plan["frame"].floor_y),
+                           "note": "plan (x, y) = R(-yaw) @ world (x, z); height = world y - floor_y_world"}})
         result["_plan"] = plan
     if damage and views is not None and opts.get("damage", True):
-        from .damage import analyse_damage
-        analyse_damage(result, views, log=log, **opts.get("damage_opts", {}))
+        from .damage import analyse_damage, analyse_damage_photo
+        if tier == "photo":
+            analyse_damage_photo(result, views, log=log)
+        else:
+            analyse_damage(result, views, log=log, **opts.get("damage_opts", {}))
         timer.lap("damage")
     result.pop("_plan", None)
     timer.lap("serialise")
