@@ -38,6 +38,8 @@ NEGATIVES = ["a clean painted wall", "a shadow on a wall", "a picture frame", "a
 ROOM_TYPES = ["bathroom", "kitchen", "bedroom", "living room", "hallway", "laundry room", "closet", "dining room",
               "home office"]
 WET_ROOMS = {"bathroom", "kitchen", "laundry room"}
+FLOOR_CRACK_MIN_DET = 0.40
+FLOOR_CRACK_MIN_VERIFY = 0.90
 
 
 class Models:
@@ -266,7 +268,7 @@ def upright_k(T_wc):
     return 1 if x > 0 else 3
 
 
-def analyse_damage(result, views, log=print, min_views=None, verify_thr=0.6, max_pix=4000):
+def analyse_damage(result, views, log=print, min_views=None, verify_thr=0.6, max_pix=4000, rules=True):
     plan = result.get("_plan")
     frame = plan["frame"] if plan else result["_frame"]
     tier = result["tier"]
@@ -336,9 +338,10 @@ def analyse_damage(result, views, log=print, min_views=None, verify_thr=0.6, max
             result["rooms"][i]["room_type"] = {"label": rt, "confidence": round(p, 3), "source": "CLIP zero-shot"}
     for reg in regions:
         result["rooms"][reg.pop("_room")]["damage"].append(reg)
-    apply_rules(result)
-    build_scope(result)
-    result["damage_models"] = MODELS
+    if rules:
+        apply_rules(result)
+        build_scope(result)
+        result["damage_models"] = MODELS
     return result
 
 
@@ -350,6 +353,36 @@ def _thin(mask, min_elong=4.0):
     c = np.cov(np.stack([xs, ys]))
     w = np.sort(np.linalg.eigvalsh(c))
     return bool(np.sqrt(w[1] / max(w[0], 1e-6)) >= min_elong)
+
+
+def analyse_damage_photo(result, per_room, log=print):
+    """Photo tier: run the damage chain per room in that room's own frame (its photos' poses live there),
+    then re-key surfaces to the stitched room ids and move footprints into the stitched plan."""
+    import copy
+    by_id = {r["id"]: r for r in result["rooms"]}
+    for rid, frame, recon, (R2, t2), local_room in per_room:
+        if rid is None or rid not in by_id:
+            continue
+        loc = copy.deepcopy(local_room)
+        loc.update(damage=[], concealed_damage_flags=[], scope=[])
+        tmp = {"tier": "photo", "rooms": [loc], "_frame": frame, "property": {"adjacency": []}}
+        views = {"images": {k: recon["images"][k] for k in recon["main"]},
+                 "views": [{"frame_index": int(k), "key": k, "T_wc": recon["poses"][k], "K": recon["K"][k],
+                            "rgb_size": recon["images"][k].shape[1::-1]} for k in recon["main"]]}
+        analyse_damage(tmp, views, log=log, min_views=1, rules=False)
+        old = local_room["id"]
+        tgt = by_id[rid]
+        for d in loc["damage"]:
+            d["id"] = d["id"].replace(old, rid, 1)
+            d["surface_id"] = d["surface_id"].replace(old, rid, 1)
+            if "footprint_plan" in d:
+                d["footprint_plan"] = [list(np.asarray(p) @ np.asarray(R2).T + t2) for p in d["footprint_plan"]]
+            tgt["damage"].append(d)
+        if "room_type" in loc:
+            tgt["room_type"] = loc["room_type"]
+    apply_rules(result)
+    build_scope(result)
+    result["damage_models"] = MODELS
 
 
 def _pixel_area(t, dirs, T, v, shape):
@@ -387,6 +420,12 @@ def _merge(raw, casters, min_views, tier):
             continue
         c = casters[g["room"]]
         sid, stype = c.surface_id(g["surface_k"])
+        if g["class"] == "crack" and stype == "floor":
+            # tile grout and floor seams dominate floor 'cracks': demand much stronger evidence there
+            det = np.mean([m[2]["score"] for m in g["members"]])
+            ver = np.mean([m[2]["verify"] for m in g["members"]])
+            if det < FLOOR_CRACK_MIN_DET or ver < FLOOR_CRACK_MIN_VERIFY:
+                continue
         L = np.array([m[0] for m in g["members"]])
         Hh = np.array([m[1] for m in g["members"]])
         lo, hi = np.median(L, 0), np.median(Hh, 0)

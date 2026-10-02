@@ -83,7 +83,22 @@ def main():
         if last is not None and lab[last] != lab[i] and i - last < fpsr * 2:
             a_, b_ = lab[last], lab[i]
             pre, post = max(last - off, 0), min(i + off, len(lab) - 1)
-            if lab[pre] == a_ and abs(pitch[pre]) < 0.5:
+            # doorway photo (protocol): taken from ~2 m inside room A, facing the doorway, so it shows
+            # A's wall around the door *and* B through it
+            door = (uv[last] + uv[i]) / 2
+            best = None
+            for q in range(last, max(last - int(8 * fpsr), 0), -1):
+                if lab[q] != a_ or abs(pitch[q]) >= 0.5:
+                    continue
+                dv = door - uv[q]
+                dist = np.linalg.norm(dv)
+                ang = abs(np.angle(np.exp(1j * (np.arctan2(dv[1], dv[0]) - heading[q]))))
+                if 1.2 <= dist <= 2.5 and ang < np.deg2rad(25):
+                    if best is None or ang < best[0]:
+                        best = (ang, q)
+            if best is not None:
+                extra[a_].append(best[1])
+            elif lab[pre] == a_ and abs(pitch[pre]) < 0.5:
                 extra[a_].append(pre)
             if lab[post] == b_ and abs(pitch[post]) < 0.5:
                 extra[b_].append(post)

@@ -1,6 +1,6 @@
 {
  "source_capture": "data/raw/with_ceiling/c7d28f72c6",
- "source_plan": "out/with_ceiling/plan.json",
+ "source_plan": "out/bench/lidar_with_ceiling/plan.json",
  "frames": {
   "R1": [
    0,
@@ -29,7 +29,7 @@
    3725,
    3747,
    3768,
-   4074,
+   3997,
    8222
   ],
   "R4": [
@@ -39,18 +39,18 @@
    3258,
    3304,
    3348,
-   3403,
-   3483
+   3396,
+   3403
   ],
   "R5": [
    1095,
+   1321,
    6112,
    6118,
    6141,
    6166,
    6235,
-   6291,
-   6390
+   6291
   ],
   "R6": [
    893,

@@ -425,59 +425,114 @@ def reconstruct_photos(cap, capture_id="photos", log=print, timer=None):
         recon.append(R); plans.append(P); jsons.append(J)
     if timer:
         timer.lap("photo_rooms")
-    # ---- stitching: image links first, then doors
+    # ---- stitching (graph): image links form clusters, door matches merge clusters
     idx = [i for i, j in enumerate(jsons) if j is not None]
-    placed = {}          # i -> (R2, t2) mapping room-i plan coords into the global plan
+    poly = {i: np.array(jsons[i]["rooms"][0]["polygon"]) for i in idx}
+    name = {i: jsons[i]["rooms"][0]["name"] for i in idx}
+    # 1. pairwise image links (room j expressed in room i's plan frame)
+    cand = []
+    for x in range(len(idx)):
+        for y in range(x + 1, len(idx)):
+            i, j = idx[x], idx[y]
+            lk = _room_link(recon[i], recon[j], lm, min_inliers=IMAGE_LINK_MIN_INLIERS)
+            if lk is not None:
+                cand.append((lk["inliers"], i, j, _link_to_plan(lk, plans[i]["frame"], plans[j]["frame"])))
+    cand.sort(key=lambda c: -c[0])
+    # 2. clusters: union along strongest image links whose placement does not overlap
+    cluster = {i: {i: (np.eye(2), np.zeros(2))} for i in idx}       # cluster id -> {room: (R, t) in cluster frame}
+    owner = {i: i for i in idx}
     links = []
-    if idx:
-        placed[idx[0]] = (np.eye(2), np.zeros(2))
-    pending = set(idx[1:])
+    for inl, i, j, (M, t) in cand:
+        ci, cj = owner[i], owner[j]
+        if ci == cj:
+            continue
+        Ri, ti = cluster[ci][i]
+        Rj, tj = cluster[cj][j]
+        # cluster-j frame -> room j -> room i -> cluster-i frame
+        R_ = Ri @ M @ Rj.T
+        t_ = Ri @ (t - M @ Rj.T @ tj) + ti
+        ok, ov = _merge_ok(cluster[ci], cluster[cj], R_, t_, poly)
+        if not ok:
+            continue
+        for k, (Rk, tk) in cluster[cj].items():
+            cluster[ci][k] = (R_ @ Rk, R_ @ tk + t_)
+            owner[k] = ci
+        del cluster[cj]
+        links.append({"a": name[i], "b": name[j], "via": ["image_match"], "inliers": inl, "overlap_m2": round(ov, 3)})
+    # 3. merge clusters by doors (largest cluster first)
     progress = True
-    while pending and progress:
+    while len(cluster) > 1 and progress:
         progress = False
-        for i in sorted(pending):
-            for a in list(placed):
-                lk = _room_link(recon[a], recon[i], lm)
-                if lk is None:
-                    continue
-                # world(B) -> world(A) is (yaw, t) in x/z; plan(B) -> world(B) and world(A) -> plan(A) via frames
-                fa, fb = plans[a]["frame"], plans[i]["frame"]
-                Rw = _rot2(-lk["yaw"])  # x/z rotation in plan-convention coordinates
-                M = fa.R @ Rw @ fb.R.T
-                # snap to Manhattan
-                ang = np.arctan2(M[1, 0], M[0, 0])
-                ang = np.round(ang / (np.pi / 2)) * (np.pi / 2)
-                M = _rot2(ang)
-                t = fa.R @ lk["t"]
-                RA, tA = placed[a]
-                R2, t2 = RA @ M, RA @ t + tA
-                poly = _xform(jsons[i]["rooms"][0]["polygon"], R2, t2)
-                ov = sum(_poly_overlap(poly, _xform(jsons[q]["rooms"][0]["polygon"], *placed[q])) for q in placed)
-                if ov > 0.3:
-                    continue
-                placed[i] = (R2, t2)
-                links.append({"a": jsons[a]["rooms"][0]["name"], "b": jsons[i]["rooms"][0]["name"],
-                              "via": ["image_match"], "inliers": lk["inliers"], "overlap_m2": round(ov, 3)})
-                pending.discard(i)
-                progress = True
-                break
-        if not progress:
-            for i in sorted(pending):
-                pl = [(jsons[q]["rooms"][0], *placed[q]) for q in placed]
-                res = place_by_doors(pl, jsons[i]["rooms"][0])
-                if res is None:
-                    continue
-                R2, t2, info = res
-                placed[i] = (R2, t2)
-                to = next(jsons[q]["rooms"][0]["name"] for q in placed if jsons[q]["rooms"][0]["id"] == info["to"])
-                links.append({"a": to, "b": jsons[i]["rooms"][0]["name"], "via": ["door_match"], **info})
-                pending.discard(i)
-                progress = True
-                break
-    unplaced = [jsons[i]["rooms"][0]["name"] for i in pending] + [rooms_in[i][0] for i, j in enumerate(jsons) if j is None]
+        order = sorted(cluster, key=lambda c: -len(cluster[c]))
+        base = order[0]
+        for other in order[1:]:
+            res = _door_merge(jsons, cluster[base], cluster[other])
+            if res is None:
+                continue
+            R_, t_, info = res
+            for k, (Rk, tk) in cluster[other].items():
+                cluster[base][k] = (R_ @ Rk, R_ @ tk + t_)
+                owner[k] = base
+            del cluster[other]
+            links.append({"a": name[info["room_a"]], "b": name[info["room_b"]], "via": ["door_match"],
+                          "door_a": info["door_a"], "door_b": info["door_b"], "overlap_m2": round(info["overlap_m2"], 3)})
+            progress = True
+            break
+    main = max(cluster, key=lambda c: (len(cluster[c]), sum(abs(L_area(poly[k])) for k in cluster[c]))) if cluster else None
+    placed = dict(cluster[main]) if main is not None else {}
+    unplaced = [name[i] for i in idx if i not in placed] + [rooms_in[i][0] for i, j in enumerate(jsons) if j is None]
     if timer:
         timer.lap("stitch")
     return _assemble(jsons, placed, links, unplaced, recon, plans, capture_id)
+
+
+IMAGE_LINK_MIN_INLIERS = 60      # cross-room PnP inliers; noise level between unrelated rooms is ~20-50 matches
+
+
+def _link_to_plan(lk, fa, fb):
+    """Image link (world B -> world A, yaw + t in x/z) -> plan B -> plan A (Manhattan-snapped rotation)."""
+    Rw = _rot2(-lk["yaw"])
+    M = fa.R @ Rw @ fb.R.T
+    ang = np.round(np.arctan2(M[1, 0], M[0, 0]) / (np.pi / 2)) * (np.pi / 2)
+    return _rot2(ang), fa.R @ lk["t"]
+
+
+def _merge_ok(ca, cb, R, t, poly, max_overlap=0.3):
+    ov = 0.0
+    for kb, (Rb, tb) in cb.items():
+        pb = poly[kb] @ (R @ Rb).T + (R @ tb + t)
+        for ka, (Ra, ta) in ca.items():
+            ov += _poly_overlap(pb, poly[ka] @ Ra.T + ta)
+    return ov <= max_overlap, ov
+
+
+def _door_merge(jsons, ca, cb, wall_gap=0.12):
+    """Best door-to-door placement of cluster cb against cluster ca (no overlap). Returns (R, t, info) or None."""
+    best = None
+    for ka, (Ra, ta) in ca.items():
+        for da in _door_candidates(jsons[ka]["rooms"][0]):
+            mid_a, n_a = da["mid"] @ Ra.T + ta, da["n"] @ Ra.T
+            for kb, (Rb, tb) in cb.items():
+                for db in _door_candidates(jsons[kb]["rooms"][0]):
+                    if abs(da["w"] - db["w"]) > max(0.12, 0.15 * da["w"]):
+                        continue
+                    for q in range(4):
+                        R = _rot2(np.pi / 2 * q)
+                        n_b = db["n"] @ (R @ Rb).T
+                        if n_b @ n_a > -0.9:
+                            continue
+                        mid_b = db["mid"] @ (R @ Rb).T + R @ tb
+                        t = mid_a - mid_b - n_a * wall_gap
+                        ov = 0.0
+                        for kb2, (Rb2, tb2) in cb.items():
+                            pb = np.array(jsons[kb2]["rooms"][0]["polygon"]) @ (R @ Rb2).T + (R @ tb2 + t)
+                            for ka2, (Ra2, ta2) in ca.items():
+                                ov += _poly_overlap(pb, np.array(jsons[ka2]["rooms"][0]["polygon"]) @ Ra2.T + ta2)
+                        score = -10 * ov - abs(da["w"] - db["w"])
+                        if ov <= 0.05 and (best is None or score > best[0]):
+                            best = (score, R, t, {"room_a": ka, "room_b": kb, "door_a": da["id"], "door_b": db["id"],
+                                                   "overlap_m2": ov})
+    return None if best is None else best[1:]
 
 
 def L_area(v):
@@ -533,8 +588,8 @@ def _assemble(jsons, placed, links, unplaced, recon, plans, capture_id):
     # (each room keeps its own world frame; damage casts per room, so poses are expressed in room frames
     # and rooms are given their own plan transforms)
     out["_frame"] = None
-    out["_per_room"] = [(name_to_id.get(jsons[i]["rooms"][0]["name"]), plans[i]["frame"], recon[i], placed[i])
-                        for i in placed]
+    out["_per_room"] = [(name_to_id.get(jsons[i]["rooms"][0]["name"]), plans[i]["frame"], recon[i], placed[i],
+                         jsons[i]["rooms"][0]) for i in placed]
     return out
 
 
