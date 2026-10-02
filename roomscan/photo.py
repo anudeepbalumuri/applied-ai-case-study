@@ -100,8 +100,16 @@ def pair_pose(fi, fj, di, dj, Ki, Kj, lm, min_inliers=20):
     return {"T_i_j": np.linalg.inv(T_j_i), "inliers": int(len(inl)), "ratio": ratio}
 
 
-def solve_graph(n, edges):
-    """edges: {(i,j): pair} -> (poses T_0_k dict, scales dict, components list)."""
+SCALE_PRIOR_SIGMA = 0.15     # per-image metric-depth scale noise (log); measured 0.84-1.39 IQR per frame
+
+
+def solve_graph(n, edges, prior_sigma=SCALE_PRIOR_SIGMA):
+    """edges: {(i,j): pair} -> (poses T_0_k dict, scales dict, components list).
+
+    Depth scales: pair ratios fix *relative* scale; a per-image prior (log s_k ~ N(0, prior_sigma))
+    ties each image to the network's own metric scale. Without the prior, small per-edge ratio
+    biases compound along long chains (video: +43% scale drift over ~480 edges).
+    """
     # depth scales: log s_j - log s_i = log ratio_ij, weighted by inliers; anchor s_root = 1
     import networkx as nx
     G = nx.Graph()
@@ -120,11 +128,11 @@ def solve_graph(n, edges):
                 r = np.zeros(len(comp))
                 r[idx[j]], r[idx[i]] = 1, -1
                 rows.append(r); b.append(np.log(max(e["ratio"], 1e-3))); wts.append(np.sqrt(e["inliers"]))
-        r = np.zeros(len(comp)); r[idx[root]] = 1
-        rows.append(r); b.append(0.0); wts.append(100.0)
+        for k in comp:
+            r = np.zeros(len(comp)); r[idx[k]] = 1
+            rows.append(r); b.append(0.0); wts.append(1.0 / prior_sigma)
         A = np.array(rows) * np.array(wts)[:, None]
         ls = np.linalg.lstsq(A, np.array(b) * np.array(wts), rcond=None)[0]
-        ls -= np.median(ls)          # every image votes on the absolute scale, not just the root
         for k in comp:
             scales[k] = float(np.exp(ls[idx[k]]))
         # chain poses along the maximum spanning tree (translations rescaled to the anchored scale)
@@ -320,8 +328,11 @@ def _room_link(A, B, lm, min_inliers=30):
     best = None
     for i in A["main"]:
         for j in B["main"]:
-            e = pair_pose(A["feats"][i], B["feats"][j], A["depths"][i] * A["scales"][i],
-                          B["depths"][j] * B["scales"][j], A["K"][i], B["K"][j], lm, min_inliers)
+            # depths in each room's final metric units (pairwise scales x camera-height correction)
+            e = pair_pose(A["feats"][i], B["feats"][j],
+                          A["depths"][i] * A["scales"][i] * A["scale_factor_from_height"],
+                          B["depths"][j] * B["scales"][j] * B["scale_factor_from_height"],
+                          A["K"][i], B["K"][j], lm, min_inliers)
             if e is None:
                 continue
             if best is None or e["inliers"] > best[0]["inliers"]:

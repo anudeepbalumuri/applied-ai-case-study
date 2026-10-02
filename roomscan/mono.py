@@ -102,11 +102,11 @@ LOOP_MIN_MATCHES = 150     # long-range pairs must be this strong (repetitive ti
                            # otherwise glue rigid segments together at wrong angles)
 
 
-def _learned_matches(images, db_path, work, exhaustive, log):
+def _learned_matches(images, db_path, work, exhaustive, log, feats=None):
     """Replace SIFT keypoints/matches in the COLMAP database with DISK + LightGlue, then verify."""
     import pycolmap
     lm = LearnedMatcher.get()
-    feats = [lm.features(im) for im in images]
+    feats = feats if feats is not None else [lm.features(im) for im in images]
     db = pycolmap.Database.open(db_path) if hasattr(pycolmap.Database, "open") and not isinstance(
         getattr(pycolmap.Database, "open"), property) else pycolmap.Database(db_path)
     ids = {im.name: im.image_id for im in db.read_all_images()}
@@ -196,7 +196,8 @@ def _pairs(n, window=LOCAL_WINDOW, quad=(16, 24, 32, 48, 64, 96, 128)):
     return sorted(P)
 
 
-def run_sfm(images, work, focal_factor=IPHONE_FOCAL_FACTOR, log=print, exhaustive=False, matcher="disk_lightglue"):
+def run_sfm(images, work, focal_factor=IPHONE_FOCAL_FACTOR, log=print, exhaustive=False, matcher="disk_lightglue",
+            feats=None):
     import pycolmap
     img_dir = os.path.join(work, "images")
     os.makedirs(img_dir, exist_ok=True)
@@ -219,7 +220,7 @@ def run_sfm(images, work, focal_factor=IPHONE_FOCAL_FACTOR, log=print, exhaustiv
     pycolmap.extract_features(db, img_dir, camera_mode=pycolmap.CameraMode.SINGLE, reader_options=reader,
                               extraction_options=ext)
     if matcher == "disk_lightglue":
-        _learned_matches(images, db, work, exhaustive or len(images) <= 40, log)
+        _learned_matches(images, db, work, exhaustive or len(images) <= 40, log, feats=feats)
     elif exhaustive or len(images) <= 40:
         pycolmap.match_exhaustive(db)
     else:
@@ -444,6 +445,39 @@ def _frame_normals_cam(depth, K, stride=8):
     pm = np.stack([(uu + 0.5 - cx) / fx * ds, (vv + 0.5 - cy) / fy * ds, ds], -1)
     n, ok = normals_from_pointmap(pm, (ds > 0.2) & (ds < 6))
     return n[ok]
+
+
+def densify_by_matches(video_path, frames, lm, min_matches=100, long_side=960, log=print):
+    """Insert raw frames wherever consecutive selected frames share < min_matches LightGlue matches.
+
+    Fast pans blur every frame of a selection window and leave too little overlap between the chosen
+    frames; consecutive raw frames (1/46 s apart) still overlap. Repeats once on the new gaps.
+    """
+    from .capture import iter_video_frames
+    feats = {f["index"]: lm.features(f["img"]) for f in frames}
+    for rnd in range(2):
+        order = sorted(frames, key=lambda f: f["index"])
+        gaps = []
+        for a, b in zip(order[:-1], order[1:]):
+            if b["index"] - a["index"] > 1 and len(lm.match(feats[a["index"]], feats[b["index"]])) < min_matches:
+                gaps.append((a["index"], b["index"]))
+        if not gaps:
+            break
+        want = set()
+        for a, b in gaps:
+            step = max(1, (b - a) // 6)                  # up to ~6 bridge frames per gap
+            want.update(range(a + step, b, step))
+        for idx, img in iter_video_frames(video_path, indices=sorted(want)):
+            sc = long_side / max(img.shape[:2])
+            small = cv2.resize(img, None, fx=sc, fy=sc, interpolation=cv2.INTER_AREA)
+            g = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+            f = {"index": idx, "img": small, "sharpness": float(cv2.Laplacian(g, cv2.CV_32F).var()),
+                 "brightness": float(g.mean()), "bridge": True}
+            frames.append(f)
+            feats[idx] = lm.features(small)
+        log(f"video: densify round {rnd + 1}: {len(gaps)} weak gaps, +{len(want)} raw frames")
+    frames.sort(key=lambda f: f["index"])
+    return frames, [feats[f["index"]] for f in frames]
 
 
 def _odometry_edges(frames, D, F, K, lm, pair_pose):

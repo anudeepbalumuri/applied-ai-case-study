@@ -86,7 +86,7 @@ def _match_axes(Rm, Rp, max_deg=12.0):
 
 
 def optimise(n, edges, init, anchors=None, W=None, sigma_r=np.deg2rad(1.0), sigma_t=0.03,
-             sigma_anchor=np.deg2rad(1.5), iters=60):
+             sigma_anchor=np.deg2rad(1.5), iters=200):
     """edges: {(i,j): {'T': T_i_j (metric), 'w': inliers, 'loop': bool}}; anchors: {i: R_cam_axes (3x3)}.
 
     W: world Manhattan axes (3x3, columns); an anchor says R_wc^T @ W ~= measured axes (up to the
@@ -107,34 +107,43 @@ def optimise(n, edges, init, anchors=None, W=None, sigma_r=np.deg2rad(1.0), sigm
     def unpack(x, a):
         return Rotation.from_rotvec(x[6 * a:6 * a + 3]), x[6 * a + 3:6 * a + 6]
 
+    # vectorised residuals (a python loop over edges with per-edge Rotation objects made every
+    # Jacobian evaluation take seconds on ~1000 edges)
+    ea = np.array([a for a, _, _ in E], int)
+    eb = np.array([b for _, b, _ in E], int)
+    Rm_inv = Rotation.from_matrix(np.array([e["T"][:3, :3] for _, _, e in E])).inv() if E else None
+    tm = np.array([e["T"][:3, 3] for _, _, e in E]) if E else np.zeros((0, 3))
+    we = np.sqrt(np.minimum([e["w"] for _, _, e in E], 400) / 100.0)[:, None] if E else np.zeros((0, 1))
+    aa = np.array([a for a, *_ in A], int)
+    am = np.array([m for _, m, *_ in A]) if A else np.zeros((0, 3))
+    aw = np.array([W[:, kk] * sg for _, _, kk, sg, _ in A]) if A else np.zeros((0, 3))
+    asup = np.sqrt(np.minimum([sup for *_, sup in A], 0.5) / 0.25)[:, None] if A else np.zeros((0, 1))
+
     def resid(x):
-        r = []
-        for a, b, e in E:
-            Ra, ta = unpack(x, a)
-            Rb, tb = unpack(x, b)
-            Rm = Rotation.from_matrix(e["T"][:3, :3])
-            tm = e["T"][:3, 3]
+        X = x.reshape(-1, 6)
+        Rall = Rotation.from_rotvec(X[:, :3])
+        parts = []
+        if len(ea):
+            Ra, Rb = Rall[ea], Rall[eb]
             Rrel = Ra.inv() * Rb
-            trel = Ra.inv().apply(tb - ta)
-            wgt = np.sqrt(min(e["w"], 400) / 100.0)
-            r.extend((Rm.inv() * Rrel).as_rotvec() / sigma_r * wgt)
-            r.extend((trel - tm) / sigma_t * wgt)
-        for a, m, kk, sg, sup in A:
-            Ra, _ = unpack(x, a)
-            pred = Ra.inv().apply(W[:, kk] * sg)         # world axis seen in the camera frame
-            r.extend(np.cross(pred, m) / sigma_anchor * np.sqrt(min(sup, 0.5) / 0.25))
-        Rr, tr = unpack(x, root)
-        r.extend((Rr.as_rotvec() - x0[0:3]) * 1e3)
-        r.extend((tr - x0[3:6]) * 1e3)
-        return np.array(r)
+            trel = Ra.inv().apply(X[eb, 3:] - X[ea, 3:])
+            parts.append(((Rm_inv * Rrel).as_rotvec() / sigma_r * we).ravel())
+            parts.append(((trel - tm) / sigma_t * we).ravel())
+        if len(aa):
+            pred = Rall[aa].inv().apply(aw)
+            parts.append((np.cross(pred, am) / sigma_anchor * asup).ravel())
+        parts.append((X[root, :3] - x0[0:3]) * 1e3)
+        parts.append((X[root, 3:] - x0[3:6]) * 1e3)
+        return np.concatenate(parts)
 
     m = 6 * len(E) + 3 * len(A) + 6
     J = lil_matrix((m, len(x0)), dtype=int)
-    row = 0
-    for a, b, _ in E:
-        J[row:row + 6, 6 * a:6 * a + 6] = 1
-        J[row:row + 6, 6 * b:6 * b + 6] = 1
-        row += 6
+    nE = len(E)
+    for q, (a, b, _) in enumerate(E):
+        for base in (0, 3 * nE):                  # rotation block, then translation block
+            J[base + 3 * q:base + 3 * q + 3, 6 * a:6 * a + 6] = 1
+            J[base + 3 * q:base + 3 * q + 3, 6 * b:6 * b + 6] = 1
+    row = 6 * nE
     for a, *_ in A:
         J[row:row + 3, 6 * a:6 * a + 3] = 1
         row += 3

@@ -66,6 +66,32 @@ def main():
         n = min(a.per_room, len(seq))
         sel = max((seq[k:k + n] for k in range(len(seq) - n + 1)), key=coverage)
         chosen[r["id"]] = sorted(sel)
+    # protocol step 1/3: entry photo (just inside the doorway, facing in) and a through-door photo
+    # (last spot in the room before leaving, facing the next room). Taken from the trajectory's
+    # room-to-room transitions; they replace sweep shots so a folder stays <= per-room photos.
+    polys = {r["id"]: Path(np.array(r["polygon"])) for r in J["rooms"] if r["id"] in chosen}
+    lab = np.full(len(uv), None, dtype=object)
+    for rid, P in polys.items():
+        lab[P.contains_points(uv)] = rid
+    fpsr = len(cap.frames) / max(cap.frames[-1].timestamp - cap.frames[0].timestamp, 1e-6)
+    off = int(0.6 * fpsr)
+    extra = {rid: [] for rid in chosen}
+    last = None
+    for i in range(len(lab)):
+        if lab[i] is None:
+            continue
+        if last is not None and lab[last] != lab[i] and i - last < fpsr * 2:
+            a_, b_ = lab[last], lab[i]
+            pre, post = max(last - off, 0), min(i + off, len(lab) - 1)
+            if lab[pre] == a_ and abs(pitch[pre]) < 0.5:
+                extra[a_].append(pre)
+            if lab[post] == b_ and abs(pitch[post]) < 0.5:
+                extra[b_].append(post)
+        last = i
+    for rid in chosen:
+        ex = sorted(set(extra[rid]))[:3]
+        keep = [i for i in chosen[rid] if i not in ex][: max(a.per_room - len(ex), 2)]
+        chosen[rid] = sorted(keep + ex)
     want = sorted({i for v in chosen.values() for i in v})
     imgs = {}
     for i, img in iter_video_frames(cap.video_path, indices=want):

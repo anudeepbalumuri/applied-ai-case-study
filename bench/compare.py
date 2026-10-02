@@ -142,7 +142,9 @@ def compare(planA, planB, room_iou=0.5, wall_tol=0.15):
                 la, lb = wa["length_m"]["value"], wb["length_m"]["value"]
                 if ov < 0.5 * min(la, lb) or abs(la - lb) > max(0.25, 0.2 * la):
                     continue
+                ci = wb["length_m"]["ci95"]
                 walls.append({"wall_a": wa["id"], "wall_b": wb["id"], "len_a": la, "len_b": lb,
+                              "b_ci95": ci, "a_in_b_ci": bool(ci[0] <= la <= ci[1]),
                               "delta_m": round(lb - la, 4), "delta_pct": round(100 * (lb - la) / la, 3),
                               "pass_1cm_or_0.5pct": bool(abs(lb - la) <= max(0.01, 0.005 * la))})
                 break
@@ -153,6 +155,29 @@ def compare(planA, planB, room_iou=0.5, wall_tol=0.15):
                       "ceiling_a": ha, "ceiling_b": hb,
                       "ceiling_spread_m": (round(abs(ha - hb), 4) if ha is not None and hb is not None else None),
                       "walls": walls})
+    # openings: match by aligned midpoint (any room), compare widths
+    def ops(plan, R=np.eye(2), t=np.zeros(2)):
+        out = []
+        for r in plan["rooms"]:
+            for o in r["openings"]:
+                m = (np.array(o["start"]) + np.array(o["end"])) / 2 @ R.T + t
+                out.append((m, o))
+        return out
+    OA, OB = ops(planA), ops(planB, R, t)
+    openings, usedo = [], set()
+    for ma, oa in OA:
+        best = None
+        for k, (mb, ob) in enumerate(OB):
+            d = np.linalg.norm(ma - mb)
+            if k not in usedo and d < 0.3 and (best is None or d < best[0]):
+                best = (d, k, ob)
+        if best:
+            usedo.add(best[1])
+            wa, wb = oa["width_m"]["value"], best[2]["width_m"]["value"]
+            openings.append({"opening_a": oa["id"], "opening_b": best[2]["id"], "kind_a": oa["kind"], "kind_b": best[2]["kind"],
+                             "width_a": wa, "width_b": wb, "delta_m": round(wb - wa, 4),
+                             "b_ci95": best[2]["width_m"]["ci95"], "a_in_b_ci": bool(best[2]["width_m"]["ci95"][0] <= wa <= best[2]["width_m"]["ci95"][1])})
+    # dedupe: the same physical door appears in both adjoining rooms
     allw = [w for r in rooms for w in r["walls"]]
     summary = {
         "alignment_iou": round(iou, 3),
@@ -164,7 +189,11 @@ def compare(planA, planB, room_iou=0.5, wall_tol=0.15):
         "total_area_a": planA["property"]["total_floor_area_m2"]["value"],
         "total_area_b": planB["property"]["total_floor_area_m2"]["value"],
     }
-    return {"summary": summary, "rooms": rooms, "transform_b_to_a": {"R": R.tolist(), "t": t.tolist()}}
+    summary["openings_a"] = len(OA)
+    summary["openings_b"] = len(OB)
+    summary["openings_matched"] = len(openings)
+    summary["opening_width_within_2cm"] = sum(abs(o["delta_m"]) <= 0.02 for o in openings)
+    return {"summary": summary, "rooms": rooms, "openings": openings, "transform_b_to_a": {"R": R.tolist(), "t": t.tolist()}}
 
 
 if __name__ == "__main__":

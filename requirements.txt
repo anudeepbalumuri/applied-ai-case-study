@@ -1,0 +1,23 @@
+# Python 3.11. torch/torchvision: CUDA 12.8 wheels (RTX 50-series needs cu128); on CPU-only machines
+# install the default PyPI wheels instead (pipeline runs, ~5-10x slower on video/photo/damage).
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.11.0
+torchvision==0.26.0
+numpy==2.4.6
+scipy==1.17.1
+opencv-python-headless==5.0.0.93
+matplotlib==3.11.2
+shapely==2.1.2
+networkx==3.6.1
+scikit-image==0.26.0
+scikit-learn==1.9.1
+pillow==12.3.0
+pillow_heif==1.8.0
+jsonschema==4.26.0
+tqdm==4.70.1
+transformers==5.18.0
+accelerate==1.15.0
+safetensors==0.8.0
+huggingface_hub==1.33.0
+kornia==0.8.3
+pycolmap==4.2.1

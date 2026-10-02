@@ -100,12 +100,30 @@ def run(path, out_dir, tier=None, capture_id=None, opts=None, log=print, damage=
     timer.lap("serialise")
     result["pipeline_version"] = PIPELINE_VERSION
     result["timing_s"] = dict(timer.t, total=round(sum(timer.t.values()), 2))
+    result = json.loads(json.dumps(result, default=_json_default))
+    _validate(result, log)
     with open(os.path.join(out_dir, "plan.json"), "w") as f:
-        json.dump(result, f, indent=1, default=_json_default)
+        json.dump(result, f, indent=1)
     render_plan(result, os.path.join(out_dir, "plan.png"), os.path.join(out_dir, "plan.svg"))
     log(f"[{capture_id}] {len(result['rooms'])} rooms, "
         f"{result['property']['total_floor_area_m2']['value']:.2f} m2, {result['timing_s']['total']} s -> {out_dir}")
     return result
+
+
+SCHEMA = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "schema", "plan.schema.json")
+
+
+def _validate(result, log):
+    """Validate against the published schema; a violation is a bug, so it is logged loudly (not fatal)."""
+    try:
+        import jsonschema
+        jsonschema.validate(result, json.load(open(SCHEMA)))
+        result["schema_valid"] = True
+    except ImportError:
+        pass
+    except Exception as e:  # jsonschema.ValidationError
+        log(f"SCHEMA VIOLATION: {str(e).splitlines()[0]}")
+        result["schema_valid"] = False
 
 
 def _json_default(o):
