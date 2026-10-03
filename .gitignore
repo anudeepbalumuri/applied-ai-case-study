@@ -6,3 +6,4 @@ data/cache/
 weights/
 out/
 data/photo_proxy/
+.fixloop_wt/
