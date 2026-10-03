@@ -436,6 +436,7 @@ MAX_FRAMES = 360
 SEQ_WINDOW = 3                 # odometry edges to the next 1..3 frames (bridges blurred frames)
 LOOP_OFFSETS = (12, 18, 24, 36, 48, 72, 96, 144)
 LOOP_MIN_INLIERS = 150
+FUSE_STRIDE = 8                # mono depth is too coarse to justify denser fusion; bounds memory on long clips
 
 
 def _frame_normals_cam(depth, K, stride=8):
@@ -524,7 +525,10 @@ def _densify(video_path, frames, D, F, K, gaps, net, lm, pair_pose, log, long_si
         if not f.get("bridge"):
             D2.append(D[pos[f["index"]]]); F2.append(F[pos[f["index"]]])
         else:
-            D2.append(net(f["img"]) / MONO_SCALE_BIAS); F2.append(lm.features(f["img"]))
+            D2.append((net(f["img"]) / MONO_SCALE_BIAS).astype(np.float16)); F2.append(lm.features(f["img"]))
+    for f in allf:
+        if f.get("bridge"):
+            f["img"] = None          # bridge nodes only link the graph; never fused or shown to damage
     raw = _odometry_edges(allf, D2, F2, K, lm, pair_pose)
     left = _breaks(len(allf), raw)
     log(f"video: densified {len(gaps)} breaks with {len(extra)} raw frames; {len(left)} breaks remain")
@@ -543,7 +547,8 @@ def reconstruct_video(cap, log=print, timer=None, target_fps=VIDEO_FPS, max_fram
     net, lm = DepthNet.get(), LearnedMatcher.get()
     h, w = frames[0]["img"].shape[:2]
     K = np.array([[IPHONE_FOCAL_FACTOR * max(w, h), 0, w / 2], [0, IPHONE_FOCAL_FACTOR * max(w, h), h / 2], [0, 0, 1.0]])
-    D = [net(f["img"]) / MONO_SCALE_BIAS for f in frames]
+    # float16 depth: hundreds of 960x720 maps in float32 pushed an 11 GB machine into swap
+    D = [(net(f["img"]) / MONO_SCALE_BIAS).astype(np.float16) for f in frames]
     F = [lm.features(f["img"]) for f in frames]
     if timer:
         timer.lap("depth_and_features")
@@ -596,13 +601,12 @@ def reconstruct_video(cap, log=print, timer=None, target_fps=VIDEO_FPS, max_fram
     keys = [k for k in sorted(poses) if not frames[k].get("bridge")]
     pts, nrm = [], []
     for k in keys:
-        d = D[k] * scales[k]
-        st = 4
-        ds = d[::st, ::st]
+        st = FUSE_STRIDE
+        ds = D[k][::st, ::st].astype(np.float32) * np.float32(scales[k])
         vv, uu = np.mgrid[0:ds.shape[0], 0:ds.shape[1]].astype(np.float32)
         pm = np.stack([(uu * st + st / 2 - K[0, 2]) / K[0, 0] * ds, (vv * st + st / 2 - K[1, 2]) / K[1, 1] * ds, ds], -1)
         nn, ok = normals_from_pointmap(pm, (ds > 0.2) & (ds < 5.0))
-        T = poses[k]
+        T = poses[k].astype(np.float32)
         pts.append(pm[ok] @ T[:3, :3].T + T[:3, 3])
         nrm.append(nn[ok] @ T[:3, :3].T)
     pts, nrm = np.concatenate(pts), np.concatenate(nrm)
