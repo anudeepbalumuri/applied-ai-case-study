@@ -37,6 +37,12 @@ def extract_plan(cloud, cam_positions, log=print, min_room_area=1.2):
         L.update_extents(edges)
         L.merge_jogs(edges)
         L.update_extents(edges)
+        # fix loop: drop polygon edges that no LiDAR points support, then re-snap merged walls over
+        # their new full extent
+        L.collapse_unsupported(edges)
+        L.update_extents(edges)
+        L.refine_edges(edges, uv, p[:, 1], n_uv, rel)
+        L.update_extents(edges)
         verts = L.edges_to_verts(edges)
         if len(verts) < 4 or _poly_area(verts) < min_room_area:
             continue

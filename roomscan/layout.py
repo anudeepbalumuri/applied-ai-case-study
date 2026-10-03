@@ -431,6 +431,69 @@ def merge_jogs(edges, tol=0.10):
     return edges
 
 
+MIN_EDGE_SUPPORT = 40      # LiDAR points on an edge's own face for it to count as a measured wall
+MAX_TONGUE_DEPTH = 0.6     # doorway notches / spurs deeper than this are kept (could be real alcoves)
+MAX_JOG_DEPTH = 0.30
+
+
+def collapse_unsupported(edges, min_support=MIN_EDGE_SUPPORT, max_tongue=MAX_TONGUE_DEPTH, max_jog=None):
+    """Evidence-based polygon regularisation: an edge survives only if LiDAR points support it.
+
+    Mask-contour polygons carry notches and jogs that are not walls (doorway cells grown into the
+    room, furniture-shadowed floor, unobserved strips). They split real walls and move their
+    endpoints differently in every capture. Two rules, iterated to a fixed point:
+
+      jog    : unsupported edge e between parallel, same-facing neighbours a, b  ->  a and b are one
+               wall: merge at the coordinate of the better-supported one (never averaged toward an
+               unsupported side).
+      tongue : unsupported edge e between parallel, opposite-facing neighbours that are both short
+               (a doorway notch / spur) -> remove the tongue; the walls on either side of it merge.
+    Real steps (niches, columns) keep their jog edge because that edge's own face is measured.
+    """
+    def unsupported(e):
+        return (not e.measured) or e.support < min_support
+
+    def weight(e):
+        return max(e.support, 0) * max(e.hi - e.lo, 1e-3)
+
+    def merge_into(a, b):
+        """Merge parallel same-facing b into a (a keeps the better-supported coordinate)."""
+        if weight(b) > weight(a):
+            a.coord, a.sigma = b.coord, b.sigma
+        a.support += b.support
+        a.measured = a.measured or b.measured
+
+    changed = True
+    while changed and len(edges) > 4:
+        changed = False
+        n = len(edges)
+        # most-unsupported first: shortest unsupported edge
+        order = sorted(range(n), key=lambda i: (not unsupported(edges[i]), edges[i].hi - edges[i].lo))
+        for i in order:
+            e = edges[i]
+            if not unsupported(e):
+                break
+            a, b = edges[i - 1], edges[(i + 1) % n]
+            if a.axis != b.axis:
+                continue
+            if a.inward == b.inward and abs(a.coord - b.coord) <= (MAX_JOG_DEPTH if max_jog is None else max_jog):  # jog
+                merge_into(a, b)
+                for j in sorted({i, (i + 1) % n}, reverse=True):
+                    edges.pop(j)
+                changed = True
+                break
+            # tongue: a and b opposite-facing and short; their outer neighbours must be parallel
+            if len(edges) >= 8 and (a.hi - a.lo) < max_tongue and (b.hi - b.lo) < max_tongue:
+                pa, nb = edges[i - 2], edges[(i + 2) % n]
+                if pa.axis == nb.axis and pa.inward == nb.inward and pa is not nb:
+                    merge_into(pa, nb)
+                    for j in sorted({(i - 1) % n, i, (i + 1) % n, (i + 2) % n}, reverse=True):
+                        edges.pop(j)
+                    changed = True
+                    break
+    return edges
+
+
 def edges_to_verts(edges):
     verts = []
     n = len(edges)
