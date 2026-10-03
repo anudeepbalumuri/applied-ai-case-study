@@ -50,9 +50,41 @@ Each jog splits a real wall into pieces and moves the endpoints of the walls nex
 
 **Honest expectation: the gate will probably still FAIL.** It requires every wall to pass. Walls where furniture hides the surface in one capture keep a few-cm surface difference that this fix does not touch. If the prediction holds, it is meaningful movement short of the gate, for the reason just stated.
 
-## Result
+## Result (regenerated end to end from raw captures by `fixloop/reproduce.sh`)
 
-*(filled after the fix ships: before/after table, readable diff, post-mortem)*
+| metric | before | predicted | **after** |
+|---|---|---|---|
+| walls passing (1 cm / 0.5 %) | 4 / 22 (18 %) | ≥ 11 / 22 | **5 / 20 (25 %)** |
+| median absolute length difference | 6.7 cm | ≤ 2.0 cm | **6.2 cm** |
+| p90 absolute length difference | 16.4 cm | — | **17.1 cm** |
+| unsupported polygon edges (with_ceiling / floor_only) | 22 / 32 | ≤ 7 / 11 | **16 / 18** |
+| gate | FAIL | FAIL | **FAIL** |
+
+Readable diff: `git diff fixloop-before fixloop-after -- roomscan/` (60 changed lines, also written to `out/fixloop/fix.diff`). Overlays: `out/fixloop/<tag>/overlay.png`.
+
+## Post-mortem: the prediction was badly wrong
+
+**What the fix did.** It removed what it targeted. Unsupported edges dropped by 27 % and 44 % (not the predicted ⅔), and the polygons got simpler: 77/84 edges became 69/66. Rooms whose wall set was already stable became exactly repeatable. R2 went to four walls within 1 cm.
+
+**Why the headline barely moved.** The hypothesis was right about the *mechanism*: wrong neighbour edges, not surface noise. It was wrong about *which* wrong edges dominate. We split every matched wall by how far its two neighbouring walls moved between the captures (`scripts/decompose_repeat.py`, same numbers before and after):
+
+| class (neighbour shift between captures) | walls before / after | median abs length difference | passing |
+|---|---|---|---|
+| both neighbours are the same surface (< 5 cm) | 6 / 6 | 0.3 / 0.7 cm | 4 / 5 |
+| a neighbour moved 5–15 cm | 11 / 10 | 7.1 / 8.9 cm | 0 / 0 |
+| a neighbour moved ≥ 15 cm | 5 / 4 | 15.4 / 12.2 cm | 0 / 0 |
+
+1. **The LiDAR wall measurement itself is repeatable at the gate level.** When both captures end a wall at the same two physical surfaces, lengths agree to well under 1 cm.
+2. **Every failing wall has a neighbour that moved 5–30 cm.** These neighbours *are* supported by LiDAR points, so an evidence filter cannot remove them. Two causes:
+   - **5–15 cm: the snap picks a different surface layer.** The "outermost dense layer" rule lands on the wall in one capture and on furniture or a cabinet face in the other, when one capture saw the wall above the furniture and the other did not.
+   - **≥ 15 cm: room extents segmented differently.** A corner region (R7, R3, R8 in the overlay) belongs to the room in one capture and not in the other.
+3. **The 0.30 m jog cap was chosen on this same data** from a 5-value sweep (0.10–∞; all gave 3–5 passing walls). The choice does not change the conclusion.
+
+**What would move the gate next** (not shipped in this loop):
+- Make layer selection consistent by preferring the layer with points above 1.8 m, where furniture rarely reaches, over the outermost layer.
+- Snap room extents to structural walls rather than to floor evidence.
+
+The decomposition predicts the size of each lever: it bounds the reachable pass rate by the share of walls in each class.
 
 ## Reproduce
 
