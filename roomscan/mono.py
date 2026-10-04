@@ -533,7 +533,7 @@ def _densify(video_path, frames, D, F, K, gaps, net, lm, pair_pose, log, per_gap
     allf = sorted(frames + extra, key=lambda f: f["index"])
     D2, F2 = [], []
     for f in allf:
-        if not f.get("bridge"):
+        if f["index"] in pos:                     # already present (selected or earlier bridge): reuse
             D2.append(D[pos[f["index"]]]); F2.append(F[pos[f["index"]]])
         else:
             D2.append((net(f["img"]) / MONO_SCALE_BIAS).astype(np.float16)); F2.append(lm.features(f["img"]))
