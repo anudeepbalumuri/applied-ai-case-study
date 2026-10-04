@@ -80,7 +80,7 @@ def cross_tier(ref, other):
     if not A or not B:
         return None
     try:
-        c = compare(A, B)
+        c = compare(A, B, include_partial=True)      # thin tiers: partial rooms still carry measurements
     except ValueError as e:
         return {"pair": [ref, other], "error": str(e)}
     ws = _wall_table(c)

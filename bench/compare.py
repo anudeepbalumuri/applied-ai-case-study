@@ -107,9 +107,9 @@ def _iou(pa, pb):
     return (A & B).sum() / max((A | B).sum(), 1)
 
 
-def compare(planA, planB, room_iou=0.5, wall_tol=0.15):
+def compare(planA, planB, room_iou=0.5, wall_tol=0.15, include_partial=False):
     planA, planB = _load(planA), _load(planB)
-    R, t, iou = align(planA, planB)
+    R, t, iou = align(planA, planB, include_partial=include_partial)
     rooms = []
     usedB = set()
     for ia, ra in enumerate(planA["rooms"]):

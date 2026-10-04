@@ -1,7 +1,7 @@
 """Interval calibration: per-tier multiplier k so that 95 % intervals cover 95 % of reference values.
 
 For every wall matched between a tier's plan and the LiDAR plan of the same capture we take
-z = |tier - lidar| / sigma_tier, where sigma_tier is the uncalibrated sigma (k = 1). The multiplier is
+z = |tier - lidar| / sigma_tier, where sigma_tier is the raw model sigma (outputs store it unscaled). The multiplier is
 k = q95(z) / 1.96, clipped to >= 1 (we never shrink an interval on this little data).
 
 Caveats (also in the technical report): the reference is LiDAR, not tape, so LiDAR's own error is
@@ -27,9 +27,12 @@ def ratios(tier):
         if not (os.path.exists(a) and os.path.exists(b)):
             continue
         B = json.load(open(b))
-        k_used = float(B.get("calibration_k", {}).get("wall_length", 1.0))
-        sig = {w["id"]: w["length_m"]["sigma"] / k_used for r in B["rooms"] for w in r["walls"]}
-        res = compare(a, b)
+        # "sigma" in the output is the raw model sigma; the multiplier k only widens ci95
+        sig = {w["id"]: w["length_m"]["sigma"] for r in B["rooms"] for w in r["walls"]}
+        try:
+            res = compare(a, b, include_partial=True)
+        except ValueError:
+            continue
         for r in res["rooms"]:
             for w in r["walls"]:
                 s = sig.get(w["wall_b"])
