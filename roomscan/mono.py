@@ -436,6 +436,8 @@ MAX_FRAMES = 360
 SEQ_WINDOW = 3                 # odometry edges to the next 1..3 frames (bridges blurred frames)
 LOOP_OFFSETS = (12, 18, 24, 36, 48, 72, 96, 144)
 LOOP_MIN_INLIERS = 150
+BRIDGE_PER_GAP = 8
+DAMAGE_VIEWS = 60              # same view budget as the LiDAR tier
 FUSE_STRIDE = 8                # mono depth is too coarse to justify denser fusion; bounds memory on long clips
 
 
@@ -509,7 +511,8 @@ def _densify(video_path, frames, D, F, K, gaps, net, lm, pair_pose, log, long_si
     want = set()
     for i in gaps:
         a, b = frames[max(i - 1, 0)]["index"], frames[min(i + 2, len(frames) - 1)]["index"]
-        want.update(range(a + 1, b))
+        # at most BRIDGE_PER_GAP evenly spaced raw frames per gap (all of them cost 10 min on a 2-min clip)
+        want.update(np.linspace(a + 1, b - 1, min(BRIDGE_PER_GAP, max(b - a - 1, 0))).round().astype(int).tolist())
     want -= {f["index"] for f in frames}
     extra = []
     for idx, img in iter_video_frames(video_path, indices=sorted(want)):
@@ -628,9 +631,10 @@ def reconstruct_video(cap, log=print, timer=None, target_fps=VIDEO_FPS, max_fram
             "odometry_edges": sum(not e["loop"] for e in edges.values()), "loop_edges": sum(e["loop"] for e in edges.values()),
             "anchors": len(anchors), "scale": {"factor": s, "cues": det}, "scale_rel_sigma": sig,
             "depth_model": DEPTH_MODEL, "frame_rate": fps}
-    views = {"images": {k: frames[k]["img"] for k in keys}, "views": [
+    vkeys = [keys[i] for i in np.linspace(0, len(keys) - 1, min(DAMAGE_VIEWS, len(keys))).astype(int)]
+    views = {"images": {k: frames[k]["img"] for k in vkeys}, "views": [
         {"frame_index": frames[k]["index"], "key": k, "T_wc": _scaled_pose(poses[k], R, s), "K": K,
-         "rgb_size": frames[k]["img"].shape[1::-1]} for k in keys]}
+         "rgb_size": frames[k]["img"].shape[1::-1]} for k in vkeys]}
     info["_frame_map"] = {k: frames[k]["index"] for k in keys}
     info["_poses"] = {k: _scaled_pose(poses[k], R, s) for k in keys}
     return cloud, info, views
