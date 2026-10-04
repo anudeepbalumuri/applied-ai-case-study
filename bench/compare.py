@@ -51,6 +51,8 @@ def align(planA, planB, include_partial=False):
         return [np.array(r["polygon"]) for r in pl["rooms"]
                 if include_partial or not r.get("observation", {}).get("partial", False)]
     PA = polys(planA)
+    if not PA or not polys(planB):
+        raise ValueError("no comparable (non-partial) rooms in one of the plans")
     best = None
     for k in range(4):
         R = _rot(k)

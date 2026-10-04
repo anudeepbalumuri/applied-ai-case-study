@@ -113,6 +113,7 @@ def plan_to_json(plan, tier, capture_id, err: ErrorModel, extra=None):
         "rooms": rooms_out,
         "scope_line_items": [],
     }
+    out["calibration_k"] = dict(err.k)
     if extra:
         out.update(extra)
     return out

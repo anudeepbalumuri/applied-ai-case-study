@@ -483,13 +483,19 @@ def densify_by_matches(video_path, frames, lm, min_matches=100, long_side=960, l
     return frames, [feats[f["index"]] for f in frames]
 
 
-def _odometry_edges(frames, D, F, K, lm, pair_pose):
+def _odometry_edges(frames, D, F, K, lm, pair_pose, cache=None):
+    """Odometry edges to the next 1..SEQ_WINDOW frames. `cache` (keyed by video frame indices) avoids
+    recomputing pairs when bridge frames are inserted and edges rebuilt."""
     n = len(frames)
     raw = {}
+    cache = {} if cache is None else cache
     for i in range(n):
         for d in range(1, SEQ_WINDOW + 1):
             if i + d < n:
-                e = pair_pose(F[i], F[i + d], D[i], D[i + d], K, K, lm)
+                key = (frames[i]["index"], frames[i + d]["index"])
+                if key not in cache:
+                    cache[key] = pair_pose(F[i], F[i + d], D[i], D[i + d], K, K, lm)
+                e = cache[key]
                 if e is not None:
                     raw[(i, i + d)] = dict(e, loop=False)
     return raw
@@ -506,13 +512,15 @@ def _breaks(n, raw):
     return [i for i in range(n - 1) if comp[i] != comp[i + 1]]
 
 
-def _densify(video_path, frames, D, F, K, gaps, net, lm, pair_pose, log, long_side=960):
+def _densify(video_path, frames, D, F, K, gaps, net, lm, pair_pose, log, per_gap=None, cache=None, long_side=960):
     from .capture import iter_video_frames
     want = set()
     for i in gaps:
         a, b = frames[max(i - 1, 0)]["index"], frames[min(i + 2, len(frames) - 1)]["index"]
-        # at most BRIDGE_PER_GAP evenly spaced raw frames per gap (all of them cost 10 min on a 2-min clip)
-        want.update(np.linspace(a + 1, b - 1, min(BRIDGE_PER_GAP, max(b - a - 1, 0))).round().astype(int).tolist())
+        if per_gap is None:
+            want.update(range(a + 1, b))                 # every raw frame across the gap
+        else:
+            want.update(np.linspace(a + 1, b - 1, min(per_gap, max(b - a - 1, 0))).round().astype(int).tolist())
     want -= {f["index"] for f in frames}
     extra = []
     for idx, img in iter_video_frames(video_path, indices=sorted(want)):
@@ -532,9 +540,10 @@ def _densify(video_path, frames, D, F, K, gaps, net, lm, pair_pose, log, long_si
     for f in allf:
         if f.get("bridge"):
             f["img"] = None          # bridge nodes only link the graph; never fused or shown to damage
-    raw = _odometry_edges(allf, D2, F2, K, lm, pair_pose)
+    raw = _odometry_edges(allf, D2, F2, K, lm, pair_pose, cache)
     left = _breaks(len(allf), raw)
-    log(f"video: densified {len(gaps)} breaks with {len(extra)} raw frames; {len(left)} breaks remain")
+    log(f"video: densified {len(gaps)} breaks with {len(extra)} raw frames"
+        f" ({'all' if per_gap is None else per_gap} per gap); {len(left)} breaks remain")
     return allf, D2, F2, raw
 
 
@@ -555,12 +564,17 @@ def reconstruct_video(cap, log=print, timer=None, target_fps=VIDEO_FPS, max_fram
     F = [lm.features(f["img"]) for f in frames]
     if timer:
         timer.lap("depth_and_features")
-    raw = _odometry_edges(frames, D, F, K, lm, pair_pose)
+    cache = {}
+    raw = _odometry_edges(frames, D, F, K, lm, pair_pose, cache)
     # densify across breaks: fast pans blur every frame of a selection window; consecutive *raw* frames
-    # (1/46 s apart) still overlap, so decode them and chain through as bridge nodes
-    gaps = _breaks(len(frames), raw)
-    if gaps:
-        frames, D, F, raw = _densify(cap.video_path, frames, D, F, K, gaps, net, lm, pair_pose, log)
+    # (1/46 s apart) still overlap, so decode them and chain through as bridge nodes. Two stages: a few
+    # evenly spaced raw frames per gap, then every raw frame across the breaks that remain.
+    for per_gap in (BRIDGE_PER_GAP, None):
+        gaps = _breaks(len(frames), raw)
+        if not gaps:
+            break
+        frames, D, F, raw = _densify(cap.video_path, frames, D, F, K, gaps, net, lm, pair_pose, log,
+                                     per_gap=per_gap, cache=cache)
     n = len(frames)
     for i in range(0, n, 2):
         if frames[i].get("bridge"):

@@ -66,7 +66,10 @@ def repeatability(a, b):
     A, B = load(a), load(b)
     if not A or not B:
         return None
-    c = compare(A, B)
+    try:
+        c = compare(A, B)
+    except ValueError as e:
+        return {"pair": [a, b], "error": str(e)}
     ws = _wall_table(c)
     ceil = [(r["room_a"], r["ceiling_a"], r["ceiling_b"], r["ceiling_spread_m"]) for r in c["rooms"]]
     return {"pair": [a, b], "summary": c["summary"], "walls": ws, "ceilings": ceil, "openings": c["openings"]}
@@ -76,7 +79,10 @@ def cross_tier(ref, other):
     A, B = load(ref), load(other)
     if not A or not B:
         return None
-    c = compare(A, B)
+    try:
+        c = compare(A, B)
+    except ValueError as e:
+        return {"pair": [ref, other], "error": str(e)}
     ws = _wall_table(c)
     rel = [abs(w["delta_m"]) / w["len_a"] for w in ws if w["len_a"] > 0.3]
     cov = [w["a_in_b_ci"] for w in ws]

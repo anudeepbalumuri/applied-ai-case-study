@@ -23,12 +23,15 @@ def write_markdown(R, path):
         if not rep:
             L.append(f"| {t} | not run | | | | | |")
             continue
+        if "error" in rep:
+            L.append(f"| {t} | — | 0 | 0 | — | — | FAIL ({rep['error']}) |")
+            continue
         s = rep["summary"]
         ok = s["walls_matched"] > 0 and s["walls_pass"] == s["walls_matched"]
         L.append(f"| {t} | {s['rooms_matched']} | {s['walls_matched']} | {s['walls_pass']} | {_f(s['median_abs_delta_m'])} m | "
                  f"{_f(s['p90_abs_delta_m'])} m | {'PASS' if ok else 'FAIL'} |")
     lid = R["repeatability"].get("lidar")
-    if lid:
+    if lid and "error" not in lid:
         L += ["", "<details><summary>LiDAR per-wall repeatability</summary>", "",
               "| wall (capture A) | A (m) | B (m) | Δ (m) | Δ % | pass |", "|---|---|---|---|---|---|"]
         for w in lid["walls"]:
@@ -68,6 +71,9 @@ def write_markdown(R, path):
     for k, v in R["cross_tier_vs_lidar"].items():
         if not v:
             L.append(f"| {k} | not run | | | | | |")
+            continue
+        if "error" in v:
+            L.append(f"| {k} | — | 0 | — | — | — | FAIL ({v['error']}) |")
             continue
         L.append(f"| {k} | {v['rooms_ref']}/{v['rooms_other']} | {v['walls_matched']} | {_f(v['median_rel_err'])} | "
                  f"{_f(v['p90_rel_err'])} | {_f(v['ci95_coverage_of_lidar'])} | {_f(v['footprint_rel_err'])} |")

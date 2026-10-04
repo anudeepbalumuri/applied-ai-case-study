@@ -10,36 +10,34 @@ Gate: every wall within 1 cm or 0.5 %.
 
 | tier | rooms matched | walls matched | walls passing | median abs Δ | p90 abs Δ | gate |
 |---|---|---|---|---|---|---|
-| lidar | 5 | 22 | 4 | 0.067 m | 0.164 m | FAIL |
-| video | not run | | | | | |
-| photo | not run | | | | | |
+| lidar | 5 | 20 | 5 | 0.062 m | 0.171 m | FAIL |
+| video | 0 | 0 | 0 | — m | — m | FAIL |
+| photo | — | 0 | 0 | — | — | FAIL (no comparable (non-partial) rooms in one of the plans) |
 
 <details><summary>LiDAR per-wall repeatability</summary>
 
 | wall (capture A) | A (m) | B (m) | Δ (m) | Δ % | pass |
 |---|---|---|---|---|---|
-| R1-W4 | 0.183 | 0.187 | +0.004 | +2.35 | ✓ |
-| R1-W5 | 0.627 | 0.698 | +0.071 | +11.39 | ✗ |
-| R1-W6 | 0.438 | 0.410 | -0.028 | -6.34 | ✗ |
-| R1-W12 | 1.852 | 1.789 | -0.063 | -3.40 | ✗ |
-| R1-W13 | 3.337 | 3.092 | -0.245 | -7.34 | ✗ |
-| R2-W0 | 1.741 | 1.982 | +0.242 | +13.90 | ✗ |
-| R2-W2 | 1.741 | 1.730 | -0.011 | -0.63 | ✗ |
-| R2-W3 | 1.655 | 1.653 | -0.003 | -0.16 | ✓ |
-| R3-W3 | 3.402 | 3.237 | -0.165 | -4.86 | ✗ |
-| R3-W4 | 1.162 | 1.314 | +0.151 | +13.02 | ✗ |
-| R3-W6 | 1.399 | 1.304 | -0.094 | -6.75 | ✗ |
-| R3-W7 | 1.073 | 1.123 | +0.049 | +4.58 | ✗ |
-| R3-W8 | 0.399 | 0.308 | -0.090 | -22.70 | ✗ |
-| R3-W9 | 1.226 | 1.174 | -0.052 | -4.25 | ✗ |
-| R7-W0 | 2.526 | 2.631 | +0.105 | +4.17 | ✗ |
-| R7-W1 | 2.550 | 2.553 | +0.003 | +0.11 | ✓ |
-| R7-W2 | 0.923 | 0.770 | -0.154 | -16.63 | ✗ |
-| R7-W3 | 0.548 | 0.548 | +0.000 | +0.02 | ✓ |
-| R7-W4 | 2.417 | 2.355 | -0.062 | -2.57 | ✗ |
-| R7-W5 | 0.912 | 0.758 | -0.154 | -16.93 | ✗ |
-| R8-W3 | 2.546 | 2.670 | +0.124 | +4.87 | ✗ |
-| R8-W4 | 1.347 | 1.391 | +0.044 | +3.29 | ✗ |
+| R1-W4 | 0.489 | 0.471 | -0.018 | -3.72 | ✗ |
+| R1-W10 | 1.849 | 1.793 | -0.056 | -3.02 | ✗ |
+| R1-W11 | 3.338 | 3.089 | -0.249 | -7.45 | ✗ |
+| R2-W0 | 1.741 | 1.731 | -0.010 | -0.56 | ✓ |
+| R2-W1 | 1.655 | 1.654 | -0.001 | -0.04 | ✓ |
+| R2-W2 | 1.741 | 1.731 | -0.010 | -0.56 | ✓ |
+| R2-W3 | 1.655 | 1.654 | -0.001 | -0.04 | ✓ |
+| R3-W3 | 3.402 | 3.237 | -0.164 | -4.83 | ✗ |
+| R3-W4 | 1.162 | 1.313 | +0.150 | +12.94 | ✗ |
+| R3-W6 | 1.398 | 1.305 | -0.093 | -6.65 | ✗ |
+| R3-W7 | 1.073 | 1.121 | +0.047 | +4.39 | ✗ |
+| R3-W8 | 0.394 | 0.309 | -0.084 | -21.45 | ✗ |
+| R3-W9 | 1.226 | 1.174 | -0.052 | -4.27 | ✗ |
+| R7-W0 | 2.575 | 2.511 | -0.064 | -2.47 | ✗ |
+| R7-W3 | 0.552 | 0.547 | -0.004 | -0.80 | ✓ |
+| R7-W4 | 2.416 | 2.355 | -0.061 | -2.52 | ✗ |
+| R7-W5 | 0.912 | 0.759 | -0.153 | -16.80 | ✗ |
+| R8-W3 | 2.546 | 2.668 | +0.122 | +4.78 | ✗ |
+| R8-W6 | 0.765 | 0.539 | -0.226 | -29.56 | ✗ |
+| R8-W7 | 0.973 | 0.879 | -0.094 | -9.65 | ✗ |
 
 </details>
 
@@ -59,23 +57,25 @@ Capture B (`floor_only`) never looks at the ceiling. The pipeline reports `null`
 
 | opening A | kind | A (m) | B (m) | Δ (m) |
 |---|---|---|---|---|
-| R2-O0 | window | 1.292 | 1.311 | +0.019 |
-| R3-O2 | door | 0.985 | 0.652 | -0.333 |
+| R1-O1 | window | 0.570 | 1.129 | +0.559 |
+| R2-O0 | window | 1.293 | 1.269 | -0.024 |
+| R3-O2 | door | 0.987 | 0.661 | -0.326 |
 | R3-O3 | window | 1.080 | 1.140 | +0.060 |
-| R4-O4 | passage | 1.040 | 0.661 | -0.379 |
-| R7-O0 | window | 2.411 | 2.363 | -0.048 |
-| R7-O1 | window | 0.940 | 0.716 | -0.224 |
-| R7-O2 | door | 0.750 | 1.196 | +0.445 |
+| R4-O4 | passage | 1.040 | 0.660 | -0.380 |
+| R7-O0 | window | 2.410 | 2.353 | -0.057 |
+| R7-O1 | window | 0.940 | 0.547 | -0.393 |
+| R7-O2 | door | 0.761 | 1.196 | +0.434 |
+| R8-O1 | passage | 0.947 | 0.661 | -0.286 |
 
 ## Drift ablation (LiDAR, multi-room)
 
 | capture | rooms on/off | floor area on/off (m²) | footprint bbox on | footprint bbox off |
 |---|---|---|---|---|
-| floor_only | 8/8 | 57.06 / 54.14 | 9.75 × 12.65 | 9.61 × 12.53 |
-| with_ceiling | 9/9 | 54.95 / 57.55 | 9.87 × 13.49 | 9.79 × 13.69 |
-| single_room | 3/3 | 21.64 / 21.96 | 7.57 × 6.10 | 7.62 × 6.06 |
+| floor_only | 8/8 | 57.07 / 53.13 | 9.75 × 12.65 | 9.62 × 12.53 |
+| with_ceiling | 9/9 | 55.52 / 58.22 | 9.87 × 13.35 | 9.79 × 13.69 |
+| single_room | 3/3 | 21.92 / 25.08 | 7.57 × 6.10 | 7.61 × 6.06 |
 
-Repeatability with drift correction **on**: median |Δ| 0.067 m, 4/22 walls pass. **Off**: median |Δ| 0.061 m, 1/13 walls pass.
+Repeatability with drift correction **on**: median |Δ| 0.062 m, 5/20 walls pass. **Off**: median |Δ| 0.058 m, 4/11 walls pass.
 
 ## Video and photo tiers vs the LiDAR pseudo-reference
 
@@ -83,12 +83,12 @@ Gates: video walls ±3 %, photo walls ±8 %, photo footprint ±8 %. Coverage is 
 
 | run | rooms (ref/run) | walls matched | median rel err | p90 rel err | 95 % CI coverage | footprint rel err |
 |---|---|---|---|---|---|---|
-| video_floor_only | not run | | | | | |
-| video_with_ceiling | not run | | | | | |
-| video_single_room | not run | | | | | |
-| photo_floor_only | not run | | | | | |
-| photo_with_ceiling | not run | | | | | |
-| photo_single_room | not run | | | | | |
+| video_floor_only | 8/2 | 0 | — | — | — | 0.882 |
+| video_with_ceiling | 9/1 | 1 | 0.101 | 0.101 | 0.000 | 0.914 |
+| video_single_room | 3/2 | 0 | — | — | — | 0.648 |
+| photo_floor_only | — | 0 | — | — | — | FAIL (no comparable (non-partial) rooms in one of the plans) |
+| photo_with_ceiling | — | 0 | — | — | — | FAIL (no comparable (non-partial) rooms in one of the plans) |
+| photo_single_room | — | 0 | — | — | — | FAIL (no comparable (non-partial) rooms in one of the plans) |
 
 ## Tape and laser gates
 
@@ -99,9 +99,15 @@ Gates: video walls ±3 %, photo walls ±8 %, photo footprint ±8 %. Coverage is 
 
 | run | total | breakdown |
 |---|---|---|
-| lidar_floor_only | 158.37 | load 0.23, drift_correction 26.03, fusion 24.18, layout 10.47, damage 97.46, serialise 0.0 |
-| lidar_with_ceiling | 272.04 | load 0.53, drift_correction 98.28, fusion 53.07, layout 14.87, damage 105.29, serialise 0.0 |
-| lidar_single_room | 101.0 | load 0.09, drift_correction 4.78, fusion 5.93, layout 1.04, damage 89.16, serialise 0.0 |
-| lidar_nodrift_floor_only | 159.34 | load 0.26, drift_correction 0.04, fusion 21.72, layout 9.12, damage 128.2, serialise 0.0 |
-| lidar_nodrift_with_ceiling | 112.06 | load 0.22, drift_correction 0.04, fusion 29.3, layout 9.11, damage 73.39, serialise 0.0 |
-| lidar_nodrift_single_room | 76.13 | load 0.05, drift_correction 0.01, fusion 3.65, layout 0.66, damage 71.76, serialise 0.0 |
+| lidar_floor_only | 152.39 | load 0.26, drift_correction 23.85, fusion 22.2, layout 9.53, damage 96.55, serialise 0.0 |
+| lidar_with_ceiling | 213.31 | load 0.46, drift_correction 76.0, fusion 30.18, layout 12.31, damage 94.36, serialise 0.0 |
+| lidar_single_room | 82.09 | load 0.06, drift_correction 3.34, fusion 4.39, layout 0.89, damage 73.41, serialise 0.0 |
+| lidar_nodrift_floor_only | 86.99 | load 0.18, drift_correction 0.03, fusion 14.49, layout 7.11, damage 65.18, serialise 0.0 |
+| lidar_nodrift_with_ceiling | 140.1 | load 0.31, drift_correction 0.05, fusion 33.58, layout 12.9, damage 93.26, serialise 0.0 |
+| lidar_nodrift_single_room | 101.32 | load 0.06, drift_correction 0.01, fusion 4.34, layout 0.98, damage 95.93, serialise 0.0 |
+| video_floor_only | 481.43 | load 0.0, frame_selection 23.54, depth_and_features 96.86, pairwise_poses 286.85, pose_graph 14.99, scale_and_fusion 0.91, layout 0.5, damage 57.78, serialise 0.0 |
+| video_with_ceiling | 790.69 | load 0.0, frame_selection 45.36, depth_and_features 100.42, pairwise_poses 591.05, pose_graph 14.09, scale_and_fusion 0.32, layout 0.18, damage 39.27, serialise 0.0 |
+| video_single_room | 256.17 | load 0.0, frame_selection 7.96, depth_and_features 49.78, pairwise_poses 111.46, pose_graph 17.11, scale_and_fusion 1.01, layout 0.24, damage 68.61, serialise 0.0 |
+| photo_floor_only | 36.79 | load 0.0, photo_rooms 20.67, stitch 2.83, damage 13.29, serialise 0.0 |
+| photo_with_ceiling | 55.11 | load 0.0, photo_rooms 32.3, stitch 12.0, damage 10.81, serialise 0.0 |
+| photo_single_room | 20.8 | load 0.0, photo_rooms 12.39, stitch 0.34, damage 8.07, serialise 0.0 |
