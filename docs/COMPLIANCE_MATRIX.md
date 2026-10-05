@@ -11,7 +11,7 @@ Status key:
 | **Part 1** | | | | |
 | 1.1 | Capture route: stock app plus a one-page protocol | `docs/CAPTURE_PROTOCOL.md` | protocol for Stray Scanner, Camera video and Camera stills | Done |
 | 1.2 | Photo tier: 2–8 stills/room, no depth or poses, produces a stitched plan | `roomscan/photo.py` | pairwise PnP graph, box layout, graph stitching | Partial: runs end to end; stitch fails on the proxy data (BENCHMARK) |
-| 1.3 | Video tier: handheld clip | `roomscan/mono.py`, `roomscan/posegraph.py` | PnP pose graph, Manhattan anchors, densification | Partial: runs; accuracy below gate (BENCHMARK) |
+| 1.3 | Video tier: handheld clip | `roomscan/mono.py`, `roomscan/posegraph.py` | PnP pose graph, Manhattan anchors, densification | Partial: runs; **fails**: footprint 49–80 % short, 3.3 h on the long clip |
 | 1.4 | LiDAR tier: depth, poses, intrinsics | `roomscan/capture.py`, `fusion.py`, `drift.py` | Stray Scanner loader, fusion, drift correction | Done |
 | 1.5 | Device matrix, with honest per-tier accuracy | `docs/DEVICE_MATRIX.md` | table | Done |
 | **Part 2: output contract** | | | | |
@@ -36,7 +36,7 @@ Status key:
 | G.3 | Repeatability within 1 cm / 0.5 % per wall | BENCHMARK repeatability | table | **Fail** (fix-loop target) |
 | G.4 | Drift accountability plus on/off ablation | `roomscan/drift.py`, BENCHMARK drift | ablation table | Done |
 | G.5 | Photo-tier whole-property stitch | BENCHMARK cross-tier | — | **Fail** on proxy data |
-| G.6 | Photo ±8 %, video ±3 %, calibration at every tier | BENCHMARK cross-tier (coverage column) | — | Fail on accuracy; calibration reported |
+| G.6 | Photo ±8 %, video ±3 %, calibration at every tier | BENCHMARK cross-tier (coverage column) | — | **Fail**: no walls matched, so calibration is not possible (k = 1, uncalibrated) |
 | **Part 3** | Head-to-head vs a consumer app, 2 rooms | `bench/head_to_head.py` | — | **Needs capture** (app export plus tape) |
 | **Part 4** | Fix loop: declaration, shipped fix, before/after regenerable, diff | `docs/FIX_LOOP.md`, `fixloop/reproduce.sh`, tags `fixloop-before` / `fixloop-after` | `out/fixloop/` | Done (result in FIX_LOOP) |
 | **Part 5** | Process evidence | git history | commits | Done (see note in the technical report) |

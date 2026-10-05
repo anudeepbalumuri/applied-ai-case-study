@@ -11,7 +11,7 @@ Gate: every wall within 1 cm or 0.5 %.
 | tier | rooms matched | walls matched | walls passing | median abs Δ | p90 abs Δ | gate |
 |---|---|---|---|---|---|---|
 | lidar | 5 | 20 | 5 | 0.062 m | 0.171 m | FAIL |
-| video | 0 | 0 | 0 | — m | — m | FAIL |
+| video | 1 | 3 | 0 | 0.085 m | 0.142 m | FAIL |
 | photo | — | 0 | 0 | — | — | FAIL (no comparable (non-partial) rooms in one of the plans) |
 
 <details><summary>LiDAR per-wall repeatability</summary>
@@ -83,12 +83,12 @@ Gates: video walls ±3 %, photo walls ±8 %, photo footprint ±8 %. Coverage is 
 
 | run | rooms (ref/run) | walls matched | median rel err | p90 rel err | 95 % CI coverage | footprint rel err |
 |---|---|---|---|---|---|---|
-| video_floor_only | 8/2 | 0 | — | — | — | 0.882 |
-| video_with_ceiling | 9/1 | 1 | 0.101 | 0.101 | 0.000 | 0.914 |
-| video_single_room | 3/2 | 0 | — | — | — | 0.648 |
-| photo_floor_only | — | 0 | — | — | — | FAIL (no comparable (non-partial) rooms in one of the plans) |
-| photo_with_ceiling | — | 0 | — | — | — | FAIL (no comparable (non-partial) rooms in one of the plans) |
-| photo_single_room | — | 0 | — | — | — | FAIL (no comparable (non-partial) rooms in one of the plans) |
+| video_floor_only | 8/3 | 0 | — | — | — | 0.746 |
+| video_with_ceiling | 9/2 | 0 | — | — | — | 0.801 |
+| video_single_room | 3/2 | 0 | — | — | — | 0.493 |
+| photo_floor_only | 8/1 | 0 | — | — | — | 0.691 |
+| photo_with_ceiling | 9/1 | 0 | — | — | — | 0.764 |
+| photo_single_room | 3/1 | 0 | — | — | — | 0.760 |
 
 ## Tape and laser gates
 
@@ -105,9 +105,9 @@ Gates: video walls ±3 %, photo walls ±8 %, photo footprint ±8 %. Coverage is 
 | lidar_nodrift_floor_only | 86.99 | load 0.18, drift_correction 0.03, fusion 14.49, layout 7.11, damage 65.18, serialise 0.0 |
 | lidar_nodrift_with_ceiling | 140.1 | load 0.31, drift_correction 0.05, fusion 33.58, layout 12.9, damage 93.26, serialise 0.0 |
 | lidar_nodrift_single_room | 101.32 | load 0.06, drift_correction 0.01, fusion 4.34, layout 0.98, damage 95.93, serialise 0.0 |
-| video_floor_only | 481.43 | load 0.0, frame_selection 23.54, depth_and_features 96.86, pairwise_poses 286.85, pose_graph 14.99, scale_and_fusion 0.91, layout 0.5, damage 57.78, serialise 0.0 |
-| video_with_ceiling | 790.69 | load 0.0, frame_selection 45.36, depth_and_features 100.42, pairwise_poses 591.05, pose_graph 14.09, scale_and_fusion 0.32, layout 0.18, damage 39.27, serialise 0.0 |
-| video_single_room | 256.17 | load 0.0, frame_selection 7.96, depth_and_features 49.78, pairwise_poses 111.46, pose_graph 17.11, scale_and_fusion 1.01, layout 0.24, damage 68.61, serialise 0.0 |
+| video_floor_only | 421.17 | load 0.0, frame_selection 15.54, depth_and_features 80.88, pairwise_poses 234.41, pose_graph 34.99, scale_and_fusion 1.22, layout 0.74, damage 53.39, serialise 0.0 |
+| video_with_ceiling | 12003.59 | load 0.0, frame_selection 24.57, depth_and_features 95.18, pairwise_poses 11785.19, pose_graph 45.46, scale_and_fusion 1.05, layout 0.63, damage 51.51, serialise 0.0 |
+| video_single_room | 310.39 | load 0.0, frame_selection 11.02, depth_and_features 64.14, pairwise_poses 127.39, pose_graph 30.68, scale_and_fusion 1.38, layout 0.71, damage 75.07, serialise 0.0 |
 | photo_floor_only | 36.79 | load 0.0, photo_rooms 20.67, stitch 2.83, damage 13.29, serialise 0.0 |
 | photo_with_ceiling | 55.11 | load 0.0, photo_rooms 32.3, stitch 12.0, damage 10.81, serialise 0.0 |
 | photo_single_room | 20.8 | load 0.0, photo_rooms 12.39, stitch 0.34, damage 8.07, serialise 0.0 |

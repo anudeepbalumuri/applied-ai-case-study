@@ -12,11 +12,11 @@ Measured on our benchmark (`docs/BENCHMARK.md`). "vs LiDAR" means agreement with
 
 | quantity | LiDAR | video | photo |
 |---|---|---|---|
-| wall length, repeatability between captures | see BENCHMARK, repeatability | — | — |
-| wall length vs LiDAR (median / p90 relative) | reference | see BENCHMARK | see BENCHMARK |
-| ceiling height | plane fit to observed ceiling; `null` + lower bound when the ceiling was never seen | weak (mono depth), wide interval | weak, wide interval |
+| wall length, repeatability (two captures) | 5/20 walls within 1 cm; median 6.2 cm. Walls with stable neighbours agree to 0.3–0.7 cm | — | — |
+| footprint vs LiDAR | reference | 49–80 % short (partial coverage) | 69–76 % short (one room placed, proxy data) |
+| ceiling height | plane fit when observed; `null` + lower bound otherwise | weak | weak |
 | openings | detected with see-through and mirror tests | coarse | doors only where photographed |
-| whole-property stitch | single world frame, drift-corrected | single world frame, drifts more | image links / door matching; unplaced rooms reported |
-| typical 95 % interval on a 3 m wall | ±1–2 cm | about ±10–20 cm | about ±25–40 cm |
+| whole-property stitch | yes (drift-corrected) | partial: the chain breaks at blurred pans | fails on proxy data |
+| honest summary | usable; repeatability gate not met | **not usable for measurement yet** | **not validated**: needs real protocol stills |
 
 The intervals widen with the scale uncertainty of each tier (`roomscan/uncertainty.py`). Per-tier multipliers in `roomscan/calibration.json` come from the coverage analysis in the technical report.

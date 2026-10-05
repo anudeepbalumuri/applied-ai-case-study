@@ -75,11 +75,31 @@ Area σ propagates edge σ times edge length, plus 2 × scale. Unmeasured quanti
 
 ## 5. Calibration analysis
 
-*(filled from BENCHMARK: coverage of the 95 % intervals of video and photo tiers against the LiDAR pseudo-reference)*
+`python -m bench.calibrate` fits a per-tier interval multiplier k = q95(|tier − LiDAR| / σ) / 1.96 over walls matched to the LiDAR pseudo-reference. **On our data there is nothing to calibrate on.** The video and photo tiers recover too few rooms for any wall to be matched against LiDAR (0 matched walls; `roomscan/calibration.json` stays at k = 1). The intervals for those tiers are therefore *uncalibrated priors* (§4), and they will be too narrow: footprint errors of 49–80 % are far outside any stated interval. This is the "confident garbage on thin input" failure the brief warns about, and we report it as such rather than hide it.
+
+LiDAR intervals are not calibrated against tape either: ground truth is pending. Repeatability gives a lower bound on their error. Walls whose two neighbours are the same physical surfaces agree to 0.3–0.7 cm (`docs/FIX_LOOP.md`), which is consistent with the ±1–2 cm stated on a 3 m wall.
 
 ## 6. Fix loop
 
-See `docs/FIX_LOOP.md`.
+`docs/FIX_LOOP.md` has the full account.
+- **Declared:** LiDAR repeatability, 4/22 walls passing, median 6.7 cm.
+- **Hypothesis:** polygon-topology artifacts.
+- **Shipped:** evidence-based polygon regularisation.
+- **Result:** 5/20 walls, median 6.2 cm. The prediction (≥ 11/22, ≤ 2 cm) was **badly wrong**.
+- **Post-mortem:** the wall-surface measurement is repeatable (0.3–0.7 cm). Failures come from *supported* but different neighbour surfaces: furniture-versus-wall layer choice, and room extents.
+- **Reproduce:** `bash fixloop/reproduce.sh` regenerates both runs from raw captures.
+
+## 6b. Results summary (BENCHMARK)
+
+| gate | result |
+|---|---|
+| LiDAR repeatability (all walls ≤ 1 cm / 0.5 %) | **FAIL**: 5/20 pass, median 6.2 cm, p90 17.1 cm |
+| Drift accountability | ablation reported. With drift correction on: 20 matched walls, 5 passing. Off: 11 matched, 4 passing. Footprint changes 2.6–3.2 m² per capture. |
+| Video ±3 % | **FAIL**: 2–3 of 3–9 rooms recovered, footprint error 49–80 %, no walls match |
+| Photo-tier stitch ±8 % | **FAIL**: 1 room placed per capture (proxy data), footprint error 69–76 % |
+| Opening, ceiling and tape gates; head-to-head | **pending**: needs tape ground truth, an app export, and real video/photo captures |
+| Damage phantoms on undamaged captures | 0 regions on all 3 LiDAR captures |
+| Timing | LiDAR 1.4–3.6 min per capture; video 5–7 min on short clips but **3.3 h** on the 3.5-minute walkthrough (raw-frame densification over 87 breaks); photo < 1 min |
 
 ## 7. Known failure modes
 
@@ -90,3 +110,9 @@ See `docs/FIX_LOOP.md`.
 - Open-plan spaces with no headers are split by the neck rule only if the constriction is clearly narrower than both sides.
 - The photo tier needs overlapping photos and photographed doorways (protocol); otherwise rooms stay unplaced.
 - Damage recall has only been checked with synthetic overlays. Our captures contain no real damage, and staged-damage captures are still required.
+- **Video tier on long, fast walkthroughs:** blur breaks the chain at every pan. Densifying with raw frames reconnects it, but it costs hours on a 3.5-minute clip, and the pose graph still drifts. The output covers only part of the property.
+- **The photo tier needs real stills that follow the protocol.** Our proxy (blurry video frames) gives partial room boxes and no cross-room links.
+
+## 8. Process note
+
+The repository was built in a few long AI-assisted sessions (Claude Code). The commit history is real and incremental, but compressed in time. Dead ends stay visible in the history: COLMAP SfM, the PnP chain without a scale prior, the camera-y gravity heuristic, the summed-positives damage verifier. The diagnostic scripts that found them are kept in `scripts/`.
